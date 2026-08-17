@@ -1,0 +1,6 @@
+[submodule "thirdparty/libmorton"]
+	path = thirdparty/libmorton
+	url = https://github.com/RechieKho/libmorton.git
+[submodule "thirdparty/unordered_dense"]
+	path = thirdparty/unordered_dense
+	url = https://github.com/RechieKho/unordered_dense.git

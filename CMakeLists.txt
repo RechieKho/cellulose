@@ -46,6 +46,22 @@ block(SCOPE_FOR VARIABLES)
 endblock()
 endif()
 
+set(THIRDPARTY_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/thirdparty")
+
+block(SCOPE_FOR VARIABLES)
+    # Configuration variables for `libmorton`.
+    set(LIBMORTON_DIRECTORY "${THIRDPARTY_DIRECTORY}/libmorton")
+    set(BUILD_TESTING OFF CACHE INTERNAL "")
+    add_subdirectory("${LIBMORTON_DIRECTORY}")
+endblock()
+
+block(SCOPE_FOR VARIABLES)
+    # Configuration variables for `libmorton`.
+    set(UNORDERED_DENSE_DIRECTORY "${THIRDPARTY_DIRECTORY}/unordered_dense")
+    set(BUILD_TESTING OFF CACHE INTERNAL "")
+    add_subdirectory("${UNORDERED_DENSE_DIRECTORY}")
+endblock()
+
 set(EXECUTABLE_NAME "${PROJECT_NAME}")
 set(LIBRARY_NAME "lib${PROJECT_NAME}")
 string(MAKE_C_IDENTIFIER "${LIBRARY_NAME}" C_IDENTIFIER_LIBRARY_NAME)
@@ -63,7 +79,12 @@ target_compile_definitions(${LIBRARY_NAME}
     VERSION_PATCH=${PROJECT_VERSION_PATCH}
     PROJECT_VERSION="${PROJECT_VERSION}"
 )
-target_link_libraries(${LIBRARY_NAME} INTERFACE raylib)
+target_link_libraries(${LIBRARY_NAME}
+    INTERFACE
+    raylib
+    libmorton
+    unordered_dense
+)
 
 add_executable(${EXECUTABLE_NAME} ${SOURCE_FILES})
 target_link_libraries(
