@@ -79,10 +79,7 @@ public:
 
 private:
 public:
-	auto set_name(std::string p_name) -> BlockBuilder & {
-		name = std::move(p_name);
-		return *this;
-	}
+	explicit BlockBuilder(std::string p_name) : name(std::move(p_name)) {}
 
 	auto build() -> Block<> {
 		if (name.length() == 0)
@@ -100,7 +97,7 @@ template <typename>
 class BlockRegistryBuilder final {
 public:
 private:
-	std::vector<BlockBuilder<>> m_block_builders;
+	std::vector<BlockBuilder<>> m_block_builders = {};
 
 public:
 	auto add_block_builder(BlockBuilder<> p_block_builder) -> BlockRegistryBuilder & {
