@@ -2,64 +2,62 @@
 #define CEL_TYPES_HPP
 
 #include <fmt/format.h>
-#include <stdexcept>
 #include <cstdint>
-#include <string>
 #include <functional>
+#include <stdexcept>
+#include <string>
 
 namespace cellulose {
 
-    using size = std::size_t;
+using size = std::size_t;
 
-    using i8 = int8_t;
-    using i16 = int16_t;
-    using i32 = int32_t;
-    using i64 = int64_t;
-    using in = int;
-    
-    using u8 = uint8_t;
-    using u16 = uint16_t;
-    using u32 = uint32_t;
-    using u64 = uint64_t;
-    using un = unsigned int;
+using i8 = int8_t;
+using i16 = int16_t;
+using i32 = int32_t;
+using i64 = int64_t;
+using in = int;
 
-    using f32 = float;
-    using f64 = double;
+using u8 = uint8_t;
+using u16 = uint16_t;
+using u32 = uint32_t;
+using u64 = uint64_t;
+using un = unsigned int;
 
-    namespace impl {
-        template<typename = void>
-        class UnimplementedException : public std::logic_error {
-        public:
+using f32 = float;
+using f64 = double;
 
-        private:
-        public:
-            explicit UnimplementedException(std::string_view p_message) 
-            : std::logic_error(fmt::format("UnimplementedException: {}", p_message)) {}
-        };
-    }
+namespace impl {
+template <typename = void>
+class UnimplementedException : public std::logic_error {
+public:
+private:
+public:
+	explicit UnimplementedException(std::string_view p_message) : std::logic_error(fmt::format("UnimplementedException: {}", p_message)) {}
+};
+} //namespace impl
 
-    using UnimplementedException = impl::UnimplementedException<>;
+using UnimplementedException = impl::UnimplementedException<>;
 
-    template<typename Function>
-    struct FunctionArgumentCount;
+template <typename Function>
+struct FunctionArgumentCount;
 
-    template<typename ReturnType, typename... Arguments>
-    struct FunctionArgumentCount<std::function<ReturnType(Arguments...)>> {
-        static constexpr size count = sizeof...(Arguments);
-    };
+template <typename ReturnType, typename... Arguments>
+struct FunctionArgumentCount<std::function<ReturnType(Arguments...)>> {
+	static constexpr size count = sizeof...(Arguments);
+};
 
-    template<typename Function>
-    struct FunctionFirstArgumentType;
+template <typename Function>
+struct FunctionFirstArgumentType;
 
-    template<typename ReturnType, typename FirstArgument>
-    struct FunctionFirstArgumentType<std::function<ReturnType(FirstArgument)>> {
-        using ArgumentType = FirstArgument;
-    };
+template <typename ReturnType, typename FirstArgument>
+struct FunctionFirstArgumentType<std::function<ReturnType(FirstArgument)>> {
+	using ArgumentType = FirstArgument;
+};
 
-    template<typename ReturnType, typename FirstArgument, typename... RestArguments>
-    struct FunctionFirstArgumentType<std::function<ReturnType(FirstArgument, RestArguments...)>> {
-        using ArgumentType = FirstArgument;
-    };
-}
+template <typename ReturnType, typename FirstArgument, typename... RestArguments>
+struct FunctionFirstArgumentType<std::function<ReturnType(FirstArgument, RestArguments...)>> {
+	using ArgumentType = FirstArgument;
+};
+} //namespace cellulose
 
 #endif // CEL_TYPES_HPP

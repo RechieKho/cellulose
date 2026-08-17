@@ -1,9 +1,9 @@
-#include <iostream>
-#include <raylib.h>
-#include <libmorton/morton.h>
 #include <ankerl/unordered_dense.h>
+#include <libmorton/morton.h>
+#include <raylib.h>
 #include <cellulose/cell.hpp>
 #include <cellulose/inspect.hpp>
+#include <iostream>
 
 int main() {
 	// From raylib's examples: https://www.raylib.com/examples.html
