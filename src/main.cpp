@@ -3,15 +3,12 @@
 #include <libmorton/morton.h>
 #include <ankerl/unordered_dense.h>
 #include <cellulose/cell.hpp>
-
-namespace LIBRARY_NAME {}
+#include <cellulose/inspect.hpp>
 
 int main() {
 	// From raylib's examples: https://www.raylib.com/examples.html
 	// Initialization
 	//--------------------------------------------------------------------------------------
-	std::cout << "Starting raylib example, version " << PROJECT_VERSION << "." << std::endl;
-
 	const int screenWidth = 800;
 	const int screenHeight = 450;
 

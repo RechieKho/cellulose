@@ -4,16 +4,17 @@
 #include <tuple>
 #include <array>
 #include "types.hpp"
+#include "block.hpp"
 
-namespace LIBRARY_NAME {
+namespace cellulose {
 
     namespace impl {
         /// @brief Cell attributes designed to be access frequently on frame-by-frame basis and thus must be dense to maximize element count per cache line.
         template<typename = void>
         class HotCellAttribute final {
         public:
-            u16 m_block_id;
             u8 m_brightness;
+            BlockID m_block_id;
         private:
         public:
         };
@@ -26,7 +27,7 @@ namespace LIBRARY_NAME {
         /// @tparam CellCount The number of cell per attribute.
         /// @tparam Attributes The type (or component) that describe a cell's attribute.
         template<size CellCount, typename... Attributes>
-        class ColdCellAttributeCollection {
+        class ColdCellAttributeCollection final {
             static_assert(
                 ((sizeof(Attributes) <= 8) && ...),
                 "Type in `Attributes` must be at most 8 byte."
@@ -36,8 +37,6 @@ namespace LIBRARY_NAME {
         private:
             std::tuple<std::array<Attributes, CellCount>...> m_attributes;
         public:
-            explicit ColdCellAttributeCollection() = default;
-
             template<typename Attribute>
             inline auto get() -> std::array<Attribute, CellCount> {
                 return std::get<std::array<Attribute, CellCount>>(m_attributes);

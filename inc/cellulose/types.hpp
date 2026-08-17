@@ -5,8 +5,9 @@
 #include <stdexcept>
 #include <cstdint>
 #include <string>
+#include <functional>
 
-namespace LIBRARY_NAME {
+namespace cellulose {
 
     using size = std::size_t;
 
@@ -38,6 +39,27 @@ namespace LIBRARY_NAME {
     }
 
     using UnimplementedException = impl::UnimplementedException<>;
+
+    template<typename Function>
+    struct FunctionArgumentCount;
+
+    template<typename ReturnType, typename... Arguments>
+    struct FunctionArgumentCount<std::function<ReturnType(Arguments...)>> {
+        static constexpr size count = sizeof...(Arguments);
+    };
+
+    template<typename Function>
+    struct FunctionFirstArgumentType;
+
+    template<typename ReturnType, typename FirstArgument>
+    struct FunctionFirstArgumentType<std::function<ReturnType(FirstArgument)>> {
+        using ArgumentType = FirstArgument;
+    };
+
+    template<typename ReturnType, typename FirstArgument, typename... RestArguments>
+    struct FunctionFirstArgumentType<std::function<ReturnType(FirstArgument, RestArguments...)>> {
+        using ArgumentType = FirstArgument;
+    };
 }
 
 #endif // CEL_TYPES_HPP
