@@ -13,8 +13,8 @@ namespace impl {
 template <typename = void>
 class HotCellAttribute final {
 public:
-	u8 m_brightness;
-	BlockID m_block_id;
+	u8 brightness;
+	BlockID block_id;
 
 private:
 public:
