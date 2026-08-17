@@ -6,11 +6,14 @@
 
 namespace cellulose {
 
+template <typename Inspected>
+using Inspector = std::function<void(Inspected &&)>;
+
 template <typename Function>
 concept IsInspect = requires {
 	requires FunctionArgumentCount<Function>::count == 1;
 	requires FunctionArgumentCount<
-			typename FunctionFirstArgumentType<Function>::ArgumentType>::count == 1;
+			typename FunctionFirstArgumentType<Function>::Type>::count == 1;
 };
 
 template <typename GroupInspector>

@@ -51,12 +51,12 @@ struct FunctionFirstArgumentType;
 
 template <typename ReturnType, typename FirstArgument>
 struct FunctionFirstArgumentType<std::function<ReturnType(FirstArgument)>> {
-	using ArgumentType = FirstArgument;
+	using Type = FirstArgument;
 };
 
 template <typename ReturnType, typename FirstArgument, typename... RestArguments>
 struct FunctionFirstArgumentType<std::function<ReturnType(FirstArgument, RestArguments...)>> {
-	using ArgumentType = FirstArgument;
+	using Type = FirstArgument;
 };
 } //namespace cellulose
 
