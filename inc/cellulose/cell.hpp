@@ -12,7 +12,8 @@ namespace LIBRARY_NAME {
         template<typename = void>
         class HotCellAttribute final {
         public:
-            u8 m_block_id;
+            u16 m_block_id;
+            u8 m_brightness;
         private:
         public:
         };
