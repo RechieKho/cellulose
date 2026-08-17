@@ -58,8 +58,13 @@ endblock()
 block(SCOPE_FOR VARIABLES)
     # Configuration variables for `libmorton`.
     set(UNORDERED_DENSE_DIRECTORY "${THIRDPARTY_DIRECTORY}/unordered_dense")
-    set(BUILD_TESTING OFF CACHE INTERNAL "")
     add_subdirectory("${UNORDERED_DENSE_DIRECTORY}")
+endblock()
+
+block(SCOPE_FOR VARIABLES)
+    # Configuration variables for `libmorton`.
+    set(FMT_DIRECTORY "${THIRDPARTY_DIRECTORY}/fmt")
+    add_subdirectory("${FMT_DIRECTORY}")
 endblock()
 
 set(EXECUTABLE_NAME "${PROJECT_NAME}")
@@ -84,6 +89,7 @@ target_link_libraries(${LIBRARY_NAME}
     raylib
     libmorton
     unordered_dense
+    fmt
 )
 
 add_executable(${EXECUTABLE_NAME} ${SOURCE_FILES})

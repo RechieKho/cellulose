@@ -2,6 +2,7 @@
 #include <raylib.h>
 #include <libmorton/morton.h>
 #include <ankerl/unordered_dense.h>
+#include <cellulose/cell_attribute.hpp>
 
 namespace LIBRARY_NAME {}
 

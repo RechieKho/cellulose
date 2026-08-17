@@ -4,3 +4,6 @@
 [submodule "thirdparty/unordered_dense"]
 	path = thirdparty/unordered_dense
 	url = https://github.com/RechieKho/unordered_dense.git
+[submodule "thirdparty/fmt"]
+	path = thirdparty/fmt
+	url = https://github.com/RechieKho/fmt.git
