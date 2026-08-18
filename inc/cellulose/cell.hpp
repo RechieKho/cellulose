@@ -56,49 +56,72 @@ public:
 	/// --- LSB ---
 	using BlockState = u16;
 
+	static constexpr u8 two_bit_mask = 0b11;
+	static constexpr u8 front_face_brightness_bit_mask_offset = 0;
+	static constexpr u8 back_face_brightness_bit_mask_offset = 2;
+	static constexpr u8 bottom_face_brightness_bit_mask_offset = 4;
+	static constexpr u8 top_face_brightness_bit_mask_offset = 6;
+	static constexpr u8 left_face_brightness_bit_mask_offset = 8;
+	static constexpr u8 right_face_brightness_bit_mask_offset = 10;
+	static constexpr u8 yaw_bit_mask_offset = 12;
+	static constexpr u8 pitch_bit_mask_offset = 14;
+
+	enum Pitch {
+		PITCH_NONE = 0b00 << pitch_bit_mask_offset,
+		PITCH_UP = 0b01 << pitch_bit_mask_offset,
+		PITCH_DOWN = 0b11 << pitch_bit_mask_offset
+	};
+
+	enum Yaw {
+		YAW_FORWARD = 0b00 << yaw_bit_mask_offset,
+		YAW_RIGHT = 0b01 << yaw_bit_mask_offset,
+		YAW_BACKWARD = 0b10 << yaw_bit_mask_offset,
+		YAW_LEFT = 0b11 << yaw_bit_mask_offset
+	};
+
 	BlockID block_id;
 	BlockState state;
 
 private:
 public:
 	constexpr auto get_pitch() const -> u8 {
-		THROW_UNIMPLEMENTED();
-		return 0;
+		return static_cast<Pitch>(
+				state & (two_bit_mask << pitch_bit_mask_offset));
 	}
 
 	constexpr auto get_yaw() const -> u8 {
-		THROW_UNIMPLEMENTED();
-		return 0;
+		return static_cast<Pitch>(
+				state & (two_bit_mask << yaw_bit_mask_offset));
 	}
 
 	constexpr auto get_right_face_brightness() const -> u8 {
-		THROW_UNIMPLEMENTED();
-		return 0;
+		return (
+				state & (two_bit_mask << right_face_brightness_bit_mask_offset) >> right_face_brightness_bit_mask_offset);
 	}
 
 	constexpr auto get_left_face_brightness() const -> u8 {
-		THROW_UNIMPLEMENTED();
-		return 0;
+		return (
+				state & (two_bit_mask << left_face_brightness_bit_mask_offset) >> left_face_brightness_bit_mask_offset);
 	}
 
 	constexpr auto get_top_face_brightness() const -> u8 {
-		THROW_UNIMPLEMENTED();
-		return 0;
+		return (
+				state & (two_bit_mask << top_face_brightness_bit_mask_offset) >> top_face_brightness_bit_mask_offset);
 	}
 
 	constexpr auto get_bottom_face_brightness() const -> u8 {
-		THROW_UNIMPLEMENTED();
-		return 0;
+		return (
+				state & (two_bit_mask << bottom_face_brightness_bit_mask_offset) >> bottom_face_brightness_bit_mask_offset);
 	}
 
 	constexpr auto get_back_face_brightness() const -> u8 {
-		THROW_UNIMPLEMENTED();
-		return 0;
+		return (
+				state & (two_bit_mask << back_face_brightness_bit_mask_offset) >> back_face_brightness_bit_mask_offset);
 	}
 
 	constexpr auto get_front_face_brightness() const -> u8 {
-		THROW_UNIMPLEMENTED();
-		return 0;
+		return (
+				state & (two_bit_mask << front_face_brightness_bit_mask_offset) >> front_face_brightness_bit_mask_offset);
 	}
 };
 static_assert(
