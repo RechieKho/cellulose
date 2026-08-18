@@ -32,7 +32,7 @@ class UnimplementedException : public std::logic_error {
 public:
 private:
 public:
-	explicit UnimplementedException(std::string_view p_message) : std::logic_error(fmt::format("UnimplementedException: {}", p_message)) {}
+	explicit UnimplementedException(std::string_view p_function_name) : std::logic_error(fmt::format("UnimplementedException: `{}` is not implemented.", p_function_name)) {}
 };
 } //namespace impl
 
@@ -59,5 +59,7 @@ struct FunctionFirstArgumentType<std::function<ReturnType(FirstArgument, RestArg
 	using Type = FirstArgument;
 };
 } //namespace cellulose
+
+#define THROW_UNIMPLEMENTED() (throw ::cellulose::UnimplementedException(__func__))
 
 #endif // CEL_TYPES_HPP

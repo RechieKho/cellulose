@@ -54,20 +54,20 @@ private:
 	BlockRegistry(NameIDMap p_name_id_map, Store p_store) : m_name_id_map(std::move(p_name_id_map)), m_store(std::move(p_store)) {}
 
 public:
-	auto inspect_block(BlockID p_block_id, Inspector<const Block<> &> p_inspector) -> void const {
+	auto inspect_block(BlockID p_block_id, Inspector<const Block<> &> p_inspector) const -> void {
 		if (p_block_id >= m_store.size())
 			return;
 		p_inspector(m_store[p_block_id]);
 	}
 
-	auto inspect_blocks(Inspector<const Store &> p_inspector) -> void const {
+	auto inspect_blocks(Inspector<const Store &> p_inspector) const -> void {
 		p_inspector(m_store);
 	}
 
-	auto get_id_from_name(std::string_view p_name) -> std::optional<BlockID> const {
+	auto get_id_from_name(const std::string &p_name) const -> std::optional<BlockID> {
 		if (!m_name_id_map.contains(p_name))
 			return std::nullopt;
-		return m_name_id_map[p_name];
+		return m_name_id_map.at(p_name);
 	}
 };
 
