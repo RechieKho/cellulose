@@ -12,8 +12,10 @@ int main() {
 	const int screenWidth = 800;
 	const int screenHeight = 450;
 
-	const cellulose::HotCellAttribute attribute{ 0, 0 };
-	attribute.get_yaw();
+	cellulose::HotCellAttribute attribute{ 0, 0 };
+	std::cout << "Before: " << attribute.get_yaw() << std::endl;
+	attribute.set_yaw(cellulose::HotCellAttribute::Yaw::YAW_RIGHT);
+	std::cout << "After: " << attribute.get_yaw() << std::endl;
 
 	InitWindow(screenWidth, screenHeight, "raylib [core] example - 3d camera mode");
 

@@ -84,14 +84,24 @@ public:
 
 private:
 public:
-	constexpr auto get_pitch() const -> u8 {
+	constexpr auto get_pitch() const -> Pitch {
 		return static_cast<Pitch>(
 				state & (two_bit_mask << pitch_bit_mask_offset));
 	}
 
-	constexpr auto get_yaw() const -> u8 {
-		return static_cast<Pitch>(
+	constexpr auto set_pitch(Pitch p_pitch) -> void {
+		const auto mask = two_bit_mask << pitch_bit_mask_offset;
+		state = (state & ~mask) | (p_pitch & mask);
+	}
+
+	constexpr auto get_yaw() const -> Yaw {
+		return static_cast<Yaw>(
 				state & (two_bit_mask << yaw_bit_mask_offset));
+	}
+
+	constexpr auto set_yaw(Yaw p_yaw) -> void {
+		const auto mask = two_bit_mask << yaw_bit_mask_offset;
+		state = (state & ~mask) | (p_yaw & mask);
 	}
 
 	constexpr auto get_right_face_brightness() const -> u8 {
@@ -99,9 +109,19 @@ public:
 				state & (two_bit_mask << right_face_brightness_bit_mask_offset) >> right_face_brightness_bit_mask_offset);
 	}
 
+	constexpr auto set_right_face_brightness(u8 p_brightness) -> void {
+		const auto mask = two_bit_mask << right_face_brightness_bit_mask_offset;
+		state = (state & ~mask) | ((p_brightness << right_face_brightness_bit_mask_offset) & mask);
+	}
+
 	constexpr auto get_left_face_brightness() const -> u8 {
 		return (
 				state & (two_bit_mask << left_face_brightness_bit_mask_offset) >> left_face_brightness_bit_mask_offset);
+	}
+
+	constexpr auto set_left_face_brightness(u8 p_brightness) -> void {
+		const auto mask = two_bit_mask << left_face_brightness_bit_mask_offset;
+		state = (state & ~mask) | ((p_brightness << left_face_brightness_bit_mask_offset) & mask);
 	}
 
 	constexpr auto get_top_face_brightness() const -> u8 {
@@ -109,9 +129,19 @@ public:
 				state & (two_bit_mask << top_face_brightness_bit_mask_offset) >> top_face_brightness_bit_mask_offset);
 	}
 
+	constexpr auto set_top_face_brightness(u8 p_brightness) -> void {
+		const auto mask = two_bit_mask << top_face_brightness_bit_mask_offset;
+		state = (state & ~mask) | ((p_brightness << top_face_brightness_bit_mask_offset) & mask);
+	}
+
 	constexpr auto get_bottom_face_brightness() const -> u8 {
 		return (
 				state & (two_bit_mask << bottom_face_brightness_bit_mask_offset) >> bottom_face_brightness_bit_mask_offset);
+	}
+
+	constexpr auto set_bottom_face_brightness(u8 p_brightness) -> void {
+		const auto mask = two_bit_mask << bottom_face_brightness_bit_mask_offset;
+		state = (state & ~mask) | ((p_brightness << bottom_face_brightness_bit_mask_offset) & mask);
 	}
 
 	constexpr auto get_back_face_brightness() const -> u8 {
@@ -119,9 +149,19 @@ public:
 				state & (two_bit_mask << back_face_brightness_bit_mask_offset) >> back_face_brightness_bit_mask_offset);
 	}
 
+	constexpr auto set_back_face_brightness(u8 p_brightness) -> void {
+		const auto mask = two_bit_mask << back_face_brightness_bit_mask_offset;
+		state = (state & ~mask) | ((p_brightness << back_face_brightness_bit_mask_offset) & mask);
+	}
+
 	constexpr auto get_front_face_brightness() const -> u8 {
 		return (
 				state & (two_bit_mask << front_face_brightness_bit_mask_offset) >> front_face_brightness_bit_mask_offset);
+	}
+
+	constexpr auto set_front_face_brightness(u8 p_brightness) -> void {
+		const auto mask = two_bit_mask << front_face_brightness_bit_mask_offset;
+		state = (state & ~mask) | ((p_brightness << front_face_brightness_bit_mask_offset) & mask);
 	}
 };
 static_assert(
