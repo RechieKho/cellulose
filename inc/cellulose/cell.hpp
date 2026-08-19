@@ -3,6 +3,7 @@
 
 #include "block.hpp"
 #include "types.hpp"
+#include <ankerl/unordered_dense.h>
 #include <array>
 #include <tuple>
 
@@ -168,14 +169,14 @@ static_assert(
 		sizeof(HotCellAttribute<>) <= 4,
 		"`HotCellAttribute` must be at most 4 byte to maximize element count per cache line.");
 
-/// @brief  Collection of user-defined cell attribute designed to be access regularly and thus grouped based on type to reduce cache pollution.
+/// @brief  Collection of cell attributes arranged in a contiguous memory (which has good cache spatial locality), and thus required the element to be small (at most 8 bytes) to avoid consuming large memory.
 /// @tparam CellCount The number of cell per attribute.
-/// @tparam Attributes The type (or component) that describe a cell's attribute.
+/// @tparam ...Attributes The type (or component) that describe a cell's attribute.
 template <size CellCount, typename... Attributes>
-class ColdCellAttributeCollection final {
+class PackedCellAttributeCollection final {
 	static_assert(
 			((sizeof(Attributes) <= 8) && ...),
-			"Type in `Attributes` must be at most 8 byte.");
+			"Type in `Attributes` must be at most 8 byte. For large element, use `SparseCellAttributeCollection`.");
 
 public:
 	static constexpr size attribute_count = sizeof...(Attributes);
@@ -189,11 +190,35 @@ public:
 		return std::get<std::array<Attribute, CellCount>>(m_attributes);
 	}
 };
+
+/// @brief  Collection of cell attributes sparsely arranged, designed for large elements.
+/// @tparam ...Attributes The type (or component) that describe a cell's attribute.
+template <typename... Attributes>
+class SparseCellAttributeCollection final {
+	static_assert(
+			((sizeof(Attributes) >= 8) && ...),
+			"Type in `Attributes` must be larger than 8 byte. For small elements, use `PackedCellAttributeCollection`.");
+
+public:
+	static constexpr size attribute_count = sizeof...(Attributes);
+
+private:
+	std::tuple<ankerl::unordered_dense::map<size, Attributes>...> m_attributes;
+
+public:
+	template <typename Attribute>
+	inline auto get() -> ankerl::unordered_dense::map<size, Attribute> {
+		return std::get<ankerl::unordered_dense::map<size, Attribute>>(m_attributes);
+	}
+};
+
 } //namespace impl
 
 using HotCellAttribute = impl::HotCellAttribute<>;
 template <size CellCount, typename... Attributes>
-using ColdCellAttributeCollection = impl::ColdCellAttributeCollection<CellCount, Attributes...>;
+using PackedCellAttributeCollection = impl::PackedCellAttributeCollection<CellCount, Attributes...>;
+template <typename... Attributes>
+using SparseCellAttributeCollection = impl::SparseCellAttributeCollection<Attributes...>;
 } //namespace cellulose
 
 #endif // CEL_CELL_ATTRIBUTE_HPP
