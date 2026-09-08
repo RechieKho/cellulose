@@ -1,7 +1,7 @@
 #include <ankerl/unordered_dense.h>
 #include <libmorton/morton.h>
 #include <raylib.h>
-#include <cellulose/cell.hpp>
+#include <cellulose/cellulose.hpp>
 #include <cellulose/inspect.hpp>
 #include <iostream>
 
@@ -12,10 +12,12 @@ int main() {
 	const int screenWidth = 800;
 	const int screenHeight = 450;
 
-	cellulose::HotCellAttribute attribute{ 0, 0 };
-	std::cout << "Before: " << attribute.get_yaw() << std::endl;
-	attribute.set_yaw(cellulose::HotCellAttribute::Yaw::YAW_RIGHT);
-	std::cout << "After: " << attribute.get_yaw() << std::endl;
+	cellulose::World<> world;
+	auto &chunk = world.chunk(cellulose::ChunkPosition{ 0, 0, 0 });
+	chunk.hot_attribute(cellulose::LocalPosition{ 1, 2, 3 }).block_id = 42;
+	std::cout << "chunks loaded: " << world.chunk_count() << std::endl;
+	std::cout << "block at (1,2,3): "
+			  << world.find_hot_attribute(cellulose::WorldPosition{ 1, 2, 3 })->block_id << std::endl;
 
 	InitWindow(screenWidth, screenHeight, "raylib [core] example - 3d camera mode");
 
