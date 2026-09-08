@@ -186,7 +186,12 @@ private:
 
 public:
 	template <typename Attribute>
-	inline auto get() -> std::array<Attribute, CellCount> {
+	inline auto get() -> std::array<Attribute, CellCount> & {
+		return std::get<std::array<Attribute, CellCount>>(m_attributes);
+	}
+
+	template <typename Attribute>
+	inline auto get() const -> const std::array<Attribute, CellCount> & {
 		return std::get<std::array<Attribute, CellCount>>(m_attributes);
 	}
 };
@@ -207,7 +212,12 @@ private:
 
 public:
 	template <typename Attribute>
-	inline auto get() -> ankerl::unordered_dense::map<size, Attribute> {
+	inline auto get() -> ankerl::unordered_dense::map<size, Attribute> & {
+		return std::get<ankerl::unordered_dense::map<size, Attribute>>(m_attributes);
+	}
+
+	template <typename Attribute>
+	inline auto get() const -> const ankerl::unordered_dense::map<size, Attribute> & {
 		return std::get<ankerl::unordered_dense::map<size, Attribute>>(m_attributes);
 	}
 };
