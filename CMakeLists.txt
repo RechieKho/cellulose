@@ -91,6 +91,18 @@ target_link_libraries(
     ${LIBRARY_NAME}
 )
 
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    set(CELLULOSE_BUILD_TESTS_DEFAULT ON)
+else()
+    set(CELLULOSE_BUILD_TESTS_DEFAULT OFF)
+endif()
+option(CELLULOSE_BUILD_TESTS "Build cellulose tests" ${CELLULOSE_BUILD_TESTS_DEFAULT})
+
+if(CELLULOSE_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()
+
 get_directory_property(HAS_PARENT PARENT_DIRECTORY)
 
 if(HAS_PARENT)
