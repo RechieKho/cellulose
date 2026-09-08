@@ -106,8 +106,7 @@ public:
 	}
 
 	constexpr auto get_right_face_brightness() const -> u8 {
-		return (
-				state & (two_bit_mask << right_face_brightness_bit_mask_offset) >> right_face_brightness_bit_mask_offset);
+		return (state & (two_bit_mask << right_face_brightness_bit_mask_offset)) >> right_face_brightness_bit_mask_offset;
 	}
 
 	constexpr auto set_right_face_brightness(u8 p_brightness) -> void {
@@ -116,8 +115,7 @@ public:
 	}
 
 	constexpr auto get_left_face_brightness() const -> u8 {
-		return (
-				state & (two_bit_mask << left_face_brightness_bit_mask_offset) >> left_face_brightness_bit_mask_offset);
+		return (state & (two_bit_mask << left_face_brightness_bit_mask_offset)) >> left_face_brightness_bit_mask_offset;
 	}
 
 	constexpr auto set_left_face_brightness(u8 p_brightness) -> void {
@@ -126,8 +124,7 @@ public:
 	}
 
 	constexpr auto get_top_face_brightness() const -> u8 {
-		return (
-				state & (two_bit_mask << top_face_brightness_bit_mask_offset) >> top_face_brightness_bit_mask_offset);
+		return (state & (two_bit_mask << top_face_brightness_bit_mask_offset)) >> top_face_brightness_bit_mask_offset;
 	}
 
 	constexpr auto set_top_face_brightness(u8 p_brightness) -> void {
@@ -136,8 +133,7 @@ public:
 	}
 
 	constexpr auto get_bottom_face_brightness() const -> u8 {
-		return (
-				state & (two_bit_mask << bottom_face_brightness_bit_mask_offset) >> bottom_face_brightness_bit_mask_offset);
+		return (state & (two_bit_mask << bottom_face_brightness_bit_mask_offset)) >> bottom_face_brightness_bit_mask_offset;
 	}
 
 	constexpr auto set_bottom_face_brightness(u8 p_brightness) -> void {
@@ -146,8 +142,7 @@ public:
 	}
 
 	constexpr auto get_back_face_brightness() const -> u8 {
-		return (
-				state & (two_bit_mask << back_face_brightness_bit_mask_offset) >> back_face_brightness_bit_mask_offset);
+		return (state & (two_bit_mask << back_face_brightness_bit_mask_offset)) >> back_face_brightness_bit_mask_offset;
 	}
 
 	constexpr auto set_back_face_brightness(u8 p_brightness) -> void {
@@ -156,8 +151,7 @@ public:
 	}
 
 	constexpr auto get_front_face_brightness() const -> u8 {
-		return (
-				state & (two_bit_mask << front_face_brightness_bit_mask_offset) >> front_face_brightness_bit_mask_offset);
+		return (state & (two_bit_mask << front_face_brightness_bit_mask_offset)) >> front_face_brightness_bit_mask_offset;
 	}
 
 	constexpr auto set_front_face_brightness(u8 p_brightness) -> void {
