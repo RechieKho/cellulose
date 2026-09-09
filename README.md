@@ -65,5 +65,7 @@ The rendering pipeline generates optimized mesh geometry from spatial data using
 The foundation — `Chunk` (Morton-coded per-cell storage) and `World` (chunk hash table) —
 is implemented and covered by the `cellulose_tests` suite (`ctest --test-dir build`).
 Concrete parameters chosen ahead of a full spec (chunk edge length 32, `u32` Morton
-index, `i64` world coordinates, `doctest` for tests) are recorded in the foundation
-implementation plan.
+index, `i64` world coordinates, `doctest` for tests) are recorded in
+[`ARCHITECTURE_SPEC.md`](ARCHITECTURE_SPEC.md). Outstanding work across all four
+subsystems is tracked in [`REMAINING_TASKS.md`](REMAINING_TASKS.md); the vendored
+design spec and foundation plan live under [`docs/superpowers/`](docs/superpowers).
