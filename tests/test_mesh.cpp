@@ -328,6 +328,75 @@ TEST_CASE("mesh_chunk with explicit rules keeps a face between unlike transparen
 	CHECK(quads_facing(mesh, cellulose::Vec3{ -1, 0, 0 }) == 2);
 }
 
+// --- T-junction welding (MeshOptions::weld_t_junctions) --------------------
+
+namespace {
+
+auto has_t_junction(const cellulose::ChunkMesh &p_mesh) -> bool {
+	for (std::size_t t = 0; t + 2 < p_mesh.indices.size(); t += 3) {
+		const std::array<cellulose::Vec3, 3> tri{
+			p_mesh.vertices[p_mesh.indices[t]].position,
+			p_mesh.vertices[p_mesh.indices[t + 1]].position,
+			p_mesh.vertices[p_mesh.indices[t + 2]].position
+		};
+		for (int e = 0; e < 3; ++e) {
+			const cellulose::Vec3 p = tri[static_cast<std::size_t>(e)];
+			const cellulose::Vec3 q = tri[static_cast<std::size_t>((e + 1) % 3)];
+			const cellulose::Vec3 pq = q - p;
+			const float len2 = cellulose::length_squared(pq);
+			if (len2 < 1e-6f)
+				continue;
+			for (const auto &vertex : p_mesh.vertices) {
+				const cellulose::Vec3 r = vertex.position;
+				if (r == p || r == q)
+					continue;
+				const cellulose::Vec3 pr = r - p;
+				if (cellulose::length_squared(cellulose::cross(pq, pr)) > 1e-4f)
+					continue; // not collinear with the edge
+				const float u = cellulose::dot(pr, pq) / len2;
+				if (u > 1e-3f && u < 1.0f - 1e-3f)
+					return true; // a vertex sits in the edge's interior
+			}
+		}
+	}
+	return false;
+}
+
+} //namespace
+
+TEST_CASE("greedy meshing leaves T-junctions and weld_t_junctions removes them") {
+	cellulose::World<> world;
+	put(world, 0, 0, 0);
+	put(world, 1, 0, 0);
+	put(world, 2, 0, 0); // a 3-wide top run
+	put(world, 0, 0, 1);
+	put(world, 1, 0, 1); // a 2-wide run beside it -> a size step
+
+	const auto plain = cellulose::mesh_chunk(world, { 0, 0, 0 }, world_solid());
+	const auto welded = cellulose::mesh_chunk(
+			world, { 0, 0, 0 }, world_solid(), cellulose::MeshOptions{ .weld_t_junctions = true });
+
+	CHECK(has_t_junction(plain));
+	CHECK_FALSE(has_t_junction(welded));
+	CHECK(welded.indices.size() > plain.indices.size());
+	// the surface is unchanged — still only the six axis-aligned normals
+	for (const auto &vertex : welded.vertices)
+		CHECK((std::abs(vertex.normal.x) + std::abs(vertex.normal.y) + std::abs(vertex.normal.z)) == doctest::Approx(1.0f));
+}
+
+TEST_CASE("weld_t_junctions is a no-op on a mesh with no size steps") {
+	cellulose::World<> world;
+	for (cellulose::i64 x = 0; x < 32; ++x)
+		for (cellulose::i64 y = 0; y < 32; ++y)
+			for (cellulose::i64 z = 0; z < 32; ++z)
+				put(world, x, y, z);
+
+	const auto welded = cellulose::mesh_chunk(
+			world, { 0, 0, 0 }, world_solid(), cellulose::MeshOptions{ .weld_t_junctions = true });
+	CHECK(welded.vertices.size() == 24); // still the six-quad shell
+	CHECK(welded.indices.size() == 36);
+}
+
 // --- ambient occlusion (MeshOptions::ambient_occlusion) ---------------------
 
 namespace {

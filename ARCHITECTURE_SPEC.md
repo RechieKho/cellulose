@@ -338,6 +338,20 @@ An occluder test is `has_geometry` (a cell that emits geometry occludes); a
 separate "does this cell cast AO" predicate is a future refinement. The built-in
 `to_raylib_mesh` colour helpers multiply `occlusion` into the vertex shade.
 
+### 4.3 T-junction welding (opt-in — `MeshOptions::weld_t_junctions`)
+
+Greedy meshing merges a wide quad next to two narrow ones, so the wide quad has
+no vertex where the narrow ones meet — a T-junction that cracks into hairline
+background-coloured gaps under perspective rasterization. With the flag,
+`impl::weld_t_junctions` post-processes the mesh (each quad is 4 vertices + 6
+indices): it hashes every vertex position, walks each quad's front-facing
+boundary, inserts an interpolated vertex wherever another quad's vertex lands on
+an edge interior, and re-fans the polygon **from its centroid** (fanning from a
+corner would sliver a split edge). Quads with no T-junction keep their original
+triangulation (AO flip included); the pass also compacts to referenced vertices.
+Off by default — adds vertices/triangles along every size step. The demo also
+enables MSAA, which hides the residual sub-pixel aliasing weld cannot.
+
 ### 4.1 Texture management
 
 Consumer-driven, renderer-neutral. Nothing in the core decodes an image.
@@ -421,6 +435,7 @@ threaded meshing (the mesher already only needs seqlock read access + `snapshot_
 | FD8 | mesher takes `has_geometry` + `is_hidden` (transparency); single-predicate `mesh_chunk` kept as the opaque convenience |
 | FD9 | `Chunk::revision()` — monotonic write counter, a dirty signal |
 | §4.2 | ambient occlusion = opt-in `MeshOptions::ambient_occlusion`; AO in the merge key (fewer merges); level-0 only; `occlusion` per vertex |
+| §4.3 | T-junction welding = opt-in `MeshOptions::weld_t_junctions`; post-pass, centroid fan, unsplit quads verbatim; fixes greedy-mesh crack pixels |
 
 Adopted from the benchmark verdicts: strict `atomic_ref` hot tier as the default
 (D3); a sharded `World` directory (D5, §1.5). Adopted as opt-in: ambient

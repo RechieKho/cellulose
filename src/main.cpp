@@ -151,6 +151,7 @@ auto main() -> int {
 					.add_block_builder(cellulose::BlockBuilder("stone").texture_all(tex_stone))
 					.build();
 
+	SetConfigFlags(FLAG_MSAA_4X_HINT); // smooth the silhouettes; T-junctions are welded in the mesh
 	InitWindow(1280, 720, "cellulose - minimal voxel game");
 	DisableCursor();
 	SetTargetFPS(60);
@@ -186,7 +187,7 @@ auto main() -> int {
 		}
 		const cellulose::ChunkMesh chunk_mesh = cellulose::mesh_chunk(
 				world, cellulose::ChunkPosition{ p_cx, 0, p_cz }, is_solid, registry,
-				cellulose::MeshOptions{ .ambient_occlusion = true });
+				cellulose::MeshOptions{ .ambient_occlusion = true, .weld_t_junctions = true });
 		if (!chunk_mesh.empty()) {
 			meshes[ux][uz] = cellulose::to_raylib_mesh(chunk_mesh, atlas);
 			has_mesh[ux][uz] = true;

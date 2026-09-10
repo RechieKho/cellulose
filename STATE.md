@@ -200,13 +200,16 @@ stricter. Two classes of thing that bit here and will bite again:
     `sample_chunk`'s AO corner sampling reads the same table. Change the
     convention *there*, not in scattered `(axis+1)%3` arithmetic.
 
-16. **AO is `MeshOptions{ .ambient_occlusion = true }`** (trailing arg on every
-    `mesh_chunk` / `mesh_chunk_lod`). Adding it forced positive concept
+16. **`MeshOptions`** is the trailing arg on every `mesh_chunk` / `mesh_chunk_lod`
+    — `{ .ambient_occlusion, .weld_t_junctions }`, both opt-in, both leave
+    geometry byte-identical when off. Adding it forced positive concept
     constraints — `impl::FaceHiddenRule` on the `(has_geometry, is_hidden)`
     overloads and `impl::FaceTextureResolver` on the both-rules-plus-texture ones
     — so `MeshOptions` in the 4th/5th slot isn't mistaken for an `is_hidden` or a
-    resolver. Don't remove those constraints. AO off ⇒ `MeshVertex::occlusion == 1`
-    and byte-identical geometry; level-0 only; occluder test is `has_geometry`.
+    resolver. Don't remove those constraints. AO: level-0 only, occluder test is
+    `has_geometry`. `weld_t_junctions`: a post-pass over `greedy_mesh`'s output
+    (quads are 4 verts + 6 indices), **centroid** fan on split quads (a corner
+    fan slivers), unsplit quads verbatim; the demo also enables MSAA.
 
 ---
 

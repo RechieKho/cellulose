@@ -170,6 +170,8 @@ The rendering pipeline generates optimized mesh geometry from spatial data using
 
 **Ambient occlusion** is an opt-in mesher flag (`MeshOptions{ .ambient_occlusion = true }`): 0fps-style per-corner AO, folded into the greedy merge key so open surfaces still merge and only faces touching an edge or crevice split into their own quads. Each `MeshVertex` carries an `occlusion` factor (`1.0` when the flag is off — geometry is then byte-identical).
 
+**T-junction welding** (`MeshOptions{ .weld_t_junctions = true }`) stitches the cracks greedy meshing leaves where a wide quad abuts narrower ones, so the sky doesn't show through as flickering pixels along size steps.
+
 ## Implementation Status
 
 All four subsystems above are implemented and covered by the `cellulose_tests`

@@ -10,9 +10,11 @@
 #include "vector.hpp"
 #include "world.hpp"
 #include <array>
+#include <cmath>
 #include <concepts>
 #include <optional>
 #include <type_traits>
+#include <unordered_set>
 #include <vector>
 
 namespace cellulose {
@@ -40,6 +42,12 @@ struct MeshOptions final {
 	/// flip anisotropic quads' triangulation. Level-0 meshes only; ignored by
 	/// `mesh_chunk_lod` at `level > 0`.
 	bool ambient_occlusion = false;
+
+	/// @brief Split every quad edge that has another quad's vertex on its interior
+	/// (a T-junction) so coplanar greedy quads of different sizes don't crack at
+	/// hairline sub-pixel gaps — the "floating background pixels" artifact. Adds a
+	/// few vertices/triangles along size steps; geometry is otherwise unchanged.
+	bool weld_t_junctions = false;
 };
 
 /// @brief Triangle geometry for one chunk: `indices` are triples into `vertices`.
@@ -152,6 +160,113 @@ inline auto unpack_corner_ao(u8 p_packed) -> std::array<u8, 4> {
 		static_cast<u8>((p_packed >> 4) & 0x3u), static_cast<u8>((p_packed >> 6) & 0x3u) };
 }
 
+/// @brief Split every quad edge that carries another quad's vertex on its
+/// interior. `greedy_mesh` emits each quad as 4 consecutive vertices + 6 indices;
+/// this walks each quad's boundary, inserts an interpolated vertex wherever a
+/// T-junction sits, fan-triangulates the result, and compacts away the quads it
+/// replaced. Positions are integers in `[0, chunk_edge_length]`.
+inline auto weld_t_junctions(ChunkMesh &p_mesh) -> void {
+	const size quad_count = p_mesh.vertices.size() / 4;
+	if (quad_count == 0)
+		return;
+
+	const auto key_of = [](const Vec3 &p_position) -> u64 {
+		const auto q = [](f32 p_value) -> u64 {
+			return static_cast<u64>(static_cast<i64>(std::lround(p_value)) + 1024);
+		};
+		return q(p_position.x) | (q(p_position.y) << 20) | (q(p_position.z) << 40);
+	};
+
+	std::unordered_set<u64> corner_positions;
+	corner_positions.reserve(p_mesh.vertices.size() * 2);
+	for (const auto &vertex : p_mesh.vertices)
+		corner_positions.insert(key_of(vertex.position));
+
+	const auto lerp_vertex = [](const MeshVertex &p_a, const MeshVertex &p_b, f32 p_t) -> MeshVertex {
+		MeshVertex out = p_a;
+		out.position = p_a.position + (p_b.position - p_a.position) * p_t;
+		out.u = p_a.u + (p_b.u - p_a.u) * p_t;
+		out.v = p_a.v + (p_b.v - p_a.v) * p_t;
+		out.brightness = p_a.brightness + (p_b.brightness - p_a.brightness) * p_t;
+		out.occlusion = p_a.occlusion + (p_b.occlusion - p_a.occlusion) * p_t;
+		return out;
+	};
+
+	std::vector<MeshVertex> welded_vertices;
+	std::vector<u32> welded_indices;
+	welded_vertices.reserve(p_mesh.vertices.size());
+	welded_indices.reserve(p_mesh.indices.size());
+
+	std::vector<MeshVertex> ring;
+	for (size k = 0; k < quad_count; ++k) {
+		const std::array<MeshVertex, 4> quad{
+			p_mesh.vertices[4 * k], p_mesh.vertices[4 * k + 1],
+			p_mesh.vertices[4 * k + 2], p_mesh.vertices[4 * k + 3]
+		};
+
+		// front-facing boundary order (independent of the AO diagonal flip)
+		const Vec3 geo = cross(quad[1].position - quad[0].position, quad[3].position - quad[0].position);
+		const std::array<u32, 4> loop = dot(geo, quad[0].normal) > 0.0f
+				? std::array<u32, 4>{ 0, 1, 2, 3 }
+				: std::array<u32, 4>{ 0, 3, 2, 1 };
+
+		ring.clear();
+		for (i32 edge = 0; edge < 4; ++edge) {
+			const MeshVertex &a = quad[loop[static_cast<size>(edge)]];
+			const MeshVertex &b = quad[loop[static_cast<size>((edge + 1) % 4)]];
+			ring.push_back(a);
+			const Vec3 delta = b.position - a.position;
+			const i32 steps = static_cast<i32>(std::lround(length(delta)));
+			for (i32 s = 1; s < steps; ++s) {
+				const f32 t = static_cast<f32>(s) / static_cast<f32>(steps);
+				if (corner_positions.count(key_of(a.position + delta * t)) != 0)
+					ring.push_back(lerp_vertex(a, b, t));
+			}
+		}
+
+		const u32 base = static_cast<u32>(welded_vertices.size());
+		if (ring.size() == 4) {
+			// no T-junction — keep the quad and its original triangulation (which
+			// may carry an AO diagonal flip) verbatim.
+			for (const auto &vertex : quad)
+				welded_vertices.push_back(vertex);
+			for (size i = 0; i < 6; ++i)
+				welded_indices.push_back(base + (p_mesh.indices[6 * k + i] - static_cast<u32>(4 * k)));
+		} else {
+			// Fan from the polygon centroid — fanning from a ring vertex would
+			// make a degenerate sliver whenever that vertex's own edge was split.
+			MeshVertex centre = ring[0];
+			Vec3 sum{ 0.0f, 0.0f, 0.0f };
+			f32 su = 0.0f, sv = 0.0f, sb = 0.0f, so = 0.0f;
+			for (const auto &vertex : ring) {
+				sum = sum + vertex.position;
+				su += vertex.u;
+				sv += vertex.v;
+				sb += vertex.brightness;
+				so += vertex.occlusion;
+			}
+			const f32 inv = 1.0f / static_cast<f32>(ring.size());
+			centre.position = sum * inv;
+			centre.u = su * inv;
+			centre.v = sv * inv;
+			centre.brightness = sb * inv;
+			centre.occlusion = so * inv;
+
+			welded_vertices.push_back(centre);
+			for (const auto &vertex : ring)
+				welded_vertices.push_back(vertex);
+			for (size i = 0; i < ring.size(); ++i) {
+				welded_indices.push_back(base);
+				welded_indices.push_back(base + 1 + static_cast<u32>(i));
+				welded_indices.push_back(base + 1 + static_cast<u32>((i + 1) % ring.size()));
+			}
+		}
+	}
+
+	p_mesh.vertices = std::move(welded_vertices);
+	p_mesh.indices = std::move(welded_indices);
+}
+
 } //namespace impl
 
 /// @brief Greedy-mesh a `p_size^3` grid of `MeshSample` (indexed
@@ -165,7 +280,7 @@ inline auto unpack_corner_ao(u8 p_packed) -> std::array<u8, 4> {
 /// With `p_ambient_occlusion`, `MeshSample::face_occlusion` joins the key: a face
 /// whose 4 corners are equal merges only within that level; a face with any
 /// per-corner variation is emitted immediately as a 1×1 quad and never merges.
-inline auto greedy_mesh(const std::vector<MeshSample> &p_samples, i32 p_size, f32 p_block_scale, bool p_ambient_occlusion = false) -> ChunkMesh {
+inline auto greedy_mesh(const std::vector<MeshSample> &p_samples, i32 p_size, f32 p_block_scale, bool p_ambient_occlusion = false, bool p_weld_t_junctions = false) -> ChunkMesh {
 	ChunkMesh mesh;
 	static constexpr std::array<u8, 4> unoccluded{ 3, 3, 3, 3 };
 
@@ -281,6 +396,9 @@ inline auto greedy_mesh(const std::vector<MeshSample> &p_samples, i32 p_size, f3
 			}
 		}
 	}
+
+	if (p_weld_t_junctions)
+		impl::weld_t_junctions(mesh);
 
 	return mesh;
 }
@@ -464,7 +582,8 @@ auto mesh_chunk_impl(WorldType &p_world, const ChunkPosition &p_chunk, i32 p_lev
 			impl::sample_chunk(p_world, p_chunk, p_level, p_has_geometry, p_is_hidden, p_texture_of, p_options.ambient_occlusion),
 			static_cast<i32>(chunk_edge_length) >> p_level,
 			static_cast<f32>(1 << p_level),
-			p_options.ambient_occlusion);
+			p_options.ambient_occlusion,
+			p_options.weld_t_junctions);
 }
 
 } //namespace impl

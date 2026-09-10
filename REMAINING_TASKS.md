@@ -18,9 +18,11 @@ section and `docs/plans/design-followups.md`):
   Trigger: streaming engines adopting `Shared` widely (B5: ~25% lookup cost).
 - **D10** — `sweep_aabb` (continuous collision) + sphere / capsule casts. Trigger:
   a use for fast movers or shape casts.
-- **Optional meshing modules** — `ChunkMeshCache`, LOD seam stitching, worker-pool
-  meshing, a "casts AO" predicate distinct from `has_geometry`. Each
-  self-contained; build on demand.
+- **Optional meshing modules** — `ChunkMeshCache`, LOD seam stitching (skirts
+  between adjacent LOD levels — distinct from the intra-level T-junction welding
+  that `MeshOptions::weld_t_junctions` already does), worker-pool meshing, a
+  "casts AO" predicate distinct from `has_geometry`. Each self-contained; build
+  on demand.
 - **Won't do** — D7 non-cube block shapes, bitwise / SIMD greedy meshing (both
   recorded below with rationale).
 
