@@ -98,6 +98,11 @@ if(CELLULOSE_BUILD_TESTS)
     add_subdirectory(tests)
 endif()
 
+option(CELLULOSE_BUILD_BENCHMARKS "Build cellulose concurrency benchmarks (Release only)" OFF)
+if(CELLULOSE_BUILD_BENCHMARKS)
+    add_subdirectory(benchmarks)
+endif()
+
 get_directory_property(HAS_PARENT PARENT_DIRECTORY)
 
 if(HAS_PARENT)
