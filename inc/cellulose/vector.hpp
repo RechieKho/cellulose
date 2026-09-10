@@ -18,6 +18,29 @@ struct Vector3 final {
 
 	friend auto operator==(const Vector3 &, const Vector3 &) -> bool = default;
 
+	/// @brief Axis access: `0` → x, `1` → y, `2` → z.
+	auto operator[](size p_axis) -> T & {
+		switch (p_axis) {
+			case 0:
+				return x;
+			case 1:
+				return y;
+			default:
+				return z;
+		}
+	}
+
+	auto operator[](size p_axis) const -> const T & {
+		switch (p_axis) {
+			case 0:
+				return x;
+			case 1:
+				return y;
+			default:
+				return z;
+		}
+	}
+
 	auto operator+(const Vector3 &p_other) const -> Vector3 {
 		return { x + p_other.x, y + p_other.y, z + p_other.z };
 	}

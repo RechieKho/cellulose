@@ -17,6 +17,12 @@ TEST_CASE("vector arithmetic and products") {
 	CHECK(cellulose::dot(a, b) == doctest::Approx(32.0));
 	CHECK(cellulose::cross(Vec3d{ 1, 0, 0 }, Vec3d{ 0, 1, 0 }) == Vec3d{ 0, 0, 1 });
 	CHECK(cellulose::length_squared(Vec3d{ 2, 3, 6 }) == doctest::Approx(49.0));
+
+	Vec3d indexed{ 7.0, 8.0, 9.0 };
+	CHECK(indexed[0] == 7.0);
+	CHECK(indexed[2] == 9.0);
+	indexed[1] = 0.0;
+	CHECK(indexed == Vec3d{ 7.0, 0.0, 9.0 });
 }
 
 TEST_CASE("normalized has unit length, and the zero vector stays zero") {
@@ -27,7 +33,7 @@ TEST_CASE("normalized has unit length, and the zero vector stays zero") {
 	CHECK(cellulose::normalized(Vec3d{ 0, 0, 0 }) == Vec3d{ 0, 0, 0 });
 }
 
-TEST_CASE("to_cell floors toward negative infinity; to_point is its corner") {
+TEST_CASE("to_cell floors toward negative infinity and to_point is its corner") {
 	CHECK(cellulose::to_cell(Vec3d{ -0.1, 0.0, 2.9 }) == WorldPosition{ -1, 0, 2 });
 	CHECK(cellulose::to_cell(Vec3d{ 31.999, -32.0, 5.0 }) == WorldPosition{ 31, -32, 5 });
 	CHECK(cellulose::to_point(WorldPosition{ -1, 0, 2 }) == Vec3d{ -1.0, 0.0, 2.0 });

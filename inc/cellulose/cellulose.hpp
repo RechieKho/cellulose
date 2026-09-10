@@ -4,6 +4,7 @@
 #include "block.hpp"
 #include "cell.hpp"
 #include "chunk.hpp"
+#include "collision.hpp"
 #include "coordinate.hpp"
 #include "inspect.hpp"
 #include "morton.hpp"
