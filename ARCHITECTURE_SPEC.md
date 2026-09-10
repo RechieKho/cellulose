@@ -4,11 +4,9 @@
 and operations for Minecraft-style voxel engines under concurrent settings.
 
 This document is the self-contained architecture reference. It folds together the
-design narrative from `README.md`, the locked parameters and rulings from the
-foundation implementation plan, and the as-built public surface. Supporting
-material is vendored under `docs/superpowers/` (`spec/` — the design spec;
-`plans/` — the foundation plan and its execution ledger). Forward work is tracked
-in `REMAINING_TASKS.md`.
+design narrative from `README.md`, the locked parameters and rulings established
+while building the foundation, and the as-built public surface. Forward work is
+tracked in `REMAINING_TASKS.md`.
 
 - **Language / build:** C++20, CMake ≥ 3.10. `libcellulose` is a header-only
   `INTERFACE` target; all library code lives in headers under `inc/cellulose/`.

@@ -2,14 +2,12 @@
 
 Tasks are grouped by phase. Phase 1 mirrors the four design concerns in
 `README.md`; the design intent for each is in `ARCHITECTURE_SPEC.md` (§1–§4).
-Vendored source material: `docs/superpowers/plans/` (foundation plan + execution
-ledger) and `docs/superpowers/spec/` (core-data-structure spec).
 
 Legend: `[x]` done · `[ ]` not started · `[~]` partially done / needs follow-up.
 
 ---
 
-## Phase 1 — Core Data Structure — **complete** (branch `worktree-feat-foundation-chunk-world`, `33cf989..166f51f`)
+## Phase 1 — Core Data Structure — **complete** (merged to `main`, `33cf989..166f51f`)
 
 - [x] doctest harness wired into CTest (`tests/`, `CELLULOSE_BUILD_TESTS`)
 - [x] `*CellAttributeCollection::get()` returns references (+ const overloads)
@@ -22,11 +20,11 @@ Legend: `[x]` done · `[ ]` not started · `[~]` partially done / needs follow-u
 - [x] `cellulose.hpp` umbrella header, `src/main.cpp` demo, README status note
 - Suite: 20/20 green.
 
-### Phase 1 close-out (do before merging the branch)
+### Phase 1 close-out (cleanups on the merged foundation)
 
-- [ ] **Run and record the final whole-branch review.** The ledger ends at
-      "proceeding to final whole-branch review" (model: opus) with no recorded
-      outcome — it either did not run or left no report.
+- [ ] **Run and record a final whole-branch review** of the foundation commits
+      (`33cf989..166f51f`). The per-task reviews were clean, but the planned
+      final review was never recorded.
 - [ ] **`world.hpp` `for_each_chunk`:** `std::forward<Visitor>(p_visitor)` is
       re-forwarded on every loop iteration (move-only / stateful-rvalue visitor
       footgun). Fix: call `p_visitor(position, chunk)` inside the loop.
@@ -68,7 +66,7 @@ Design: `ARCHITECTURE_SPEC.md` §2. Chunk-level granularity.
       `std::hardware_destructive_interference_size`; pad internal chunk locks to
       isolate lock state from adjacent voxel data.
 - [ ] Concurrency stress tests (readers vs. writers; meshing while editing).
-- [ ] Write the Phase 2 plan under `docs/superpowers/plans/` before implementing.
+- [ ] Write the Phase 2 implementation plan before starting.
 
 ---
 
@@ -83,7 +81,7 @@ Design: `ARCHITECTURE_SPEC.md` §3. Built on `World` / `Chunk`.
 - [ ] **Collision detection** — collision normals + positional correction for a
       target AABB and a velocity vector (physics-integration baseline).
 - [ ] Query tests (known scenes, analytic expected hits).
-- [ ] Write the Phase 3 plan under `docs/superpowers/plans/` before implementing.
+- [ ] Write the Phase 3 implementation plan before starting.
 
 ---
 
@@ -97,7 +95,7 @@ Design: `ARCHITECTURE_SPEC.md` §4.
       multiple LODs to extend effective render distance.
 - [ ] Mesh-correctness tests (face count / winding / no cracks between LODs).
 - [ ] Wire a real render demo in `src/main.cpp` (raylib) replacing the stdout demo.
-- [ ] Write the Phase 4 plan under `docs/superpowers/plans/` before implementing.
+- [ ] Write the Phase 4 implementation plan before starting.
 
 ---
 
@@ -118,5 +116,3 @@ Design: `ARCHITECTURE_SPEC.md` §4.
       configurable, relocate the constant or add a coupling `static_assert`.
 - [ ] **`to_chunk_position` narrowing.** Unguarded `i64 -> i32` on the chunk
       axis — document or assert the effective world-size boundary.
-- [ ] Merge `worktree-feat-foundation-chunk-world` into `main` once Phase 1
-      close-out is done.
