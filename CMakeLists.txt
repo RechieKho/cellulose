@@ -28,23 +28,26 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-find_package(raylib QUIET)
 find_package(Threads REQUIRED)
 
-if(NOT TARGET raylib AND NOT raylib_FOUND)
-include(FetchContent)
+# The raylib demo executable. ON by default (CI ships it); OFF avoids the raylib
+# fetch entirely — used by the benchmark job, which needs no renderer.
+option(CELLULOSE_BUILD_DEMO "Build the raylib demo executable" ON)
 
-FetchContent_Declare(
-    raylib
-    GIT_REPOSITORY https://github.com/raysan5/raylib.git
-    VERSION 6.0
-)
-
-block(SCOPE_FOR VARIABLES)
-    # Configuration variables for `raylib`.
-    set(BUILD_EXAMPLES OFF CACHE INTERNAL "")
-    FetchContent_MakeAvailable(raylib)
-endblock()
+if(CELLULOSE_BUILD_DEMO)
+    find_package(raylib QUIET)
+    if(NOT TARGET raylib AND NOT raylib_FOUND)
+        include(FetchContent)
+        FetchContent_Declare(
+            raylib
+            GIT_REPOSITORY https://github.com/raysan5/raylib.git
+            VERSION 6.0
+        )
+        block(SCOPE_FOR VARIABLES)
+            set(BUILD_EXAMPLES OFF CACHE INTERNAL "")
+            FetchContent_MakeAvailable(raylib)
+        endblock()
+    endif()
 endif()
 
 set(THIRDPARTY_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/thirdparty")
@@ -86,13 +89,15 @@ target_compile_definitions(${LIBRARY_NAME} INTERFACE
     $<$<BOOL:${CELLULOSE_STRICT_ATOMICS}>:CELLULOSE_STRICT_ATOMICS>
 )
 
-add_executable(${EXECUTABLE_NAME} ${SOURCE_FILES})
-target_link_libraries(
-    ${EXECUTABLE_NAME}
-    PRIVATE
-    ${LIBRARY_NAME}
-    raylib
-)
+if(CELLULOSE_BUILD_DEMO)
+    add_executable(${EXECUTABLE_NAME} ${SOURCE_FILES})
+    target_link_libraries(
+        ${EXECUTABLE_NAME}
+        PRIVATE
+        ${LIBRARY_NAME}
+        raylib
+    )
+endif()
 
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     set(CELLULOSE_BUILD_TESTS_DEFAULT ON)

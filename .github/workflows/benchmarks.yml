@@ -31,7 +31,7 @@ jobs:
       - name: Configure
         run: >
           cmake -S . -B build -G Ninja
-          -DCELLULOSE_BUILD_BENCHMARKS=ON -DCELLULOSE_BUILD_TESTS=OFF
+          -DCELLULOSE_BUILD_BENCHMARKS=ON -DCELLULOSE_BUILD_TESTS=OFF -DCELLULOSE_BUILD_DEMO=OFF
           ${{ matrix.flags }}
       - name: Build
         run: ninja -C build cellulose_benchmarks
