@@ -13,6 +13,7 @@
 #include "sync.hpp"
 #include "types.hpp"
 #include "vector.hpp"
+#include "volume.hpp"
 #include "world.hpp"
 
 #endif // CEL_CELLULOSE_HPP
