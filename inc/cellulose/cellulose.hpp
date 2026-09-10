@@ -7,6 +7,7 @@
 #include "coordinate.hpp"
 #include "inspect.hpp"
 #include "morton.hpp"
+#include "rwlock.hpp"
 #include "seqlock.hpp"
 #include "sync.hpp"
 #include "types.hpp"
