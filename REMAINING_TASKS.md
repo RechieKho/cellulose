@@ -1,7 +1,12 @@
 # Cellulose — Remaining Tasks
 
-Tasks are grouped by phase. Phase 1 mirrors the four design concerns in
-`README.md`; the design intent for each is in `ARCHITECTURE_SPEC.md` (§1–§4).
+Tasks are grouped by phase — the four design concerns in `README.md`; the design
+intent and locked decisions for each are in `ARCHITECTURE_SPEC.md` (§1–§4), with
+per-phase plans under `docs/plans/`.
+
+**All four phases are implemented and tested.** What remains is the Phase 1
+close-out review, the cross-cutting backlog below, and merging `main` to
+`origin`.
 
 Legend: `[x]` done · `[ ]` not started · `[~]` partially done / needs follow-up.
 
@@ -94,24 +99,27 @@ collision, sphere/capsule casts, registry-driven solidity.
 
 ---
 
-## Phase 4 — Rendering Pipeline — **planned, not started**
+## Phase 4 — Rendering Pipeline — **complete**
 
 Design: `ARCHITECTURE_SPEC.md` §4. Plan (decisions D1–D11):
 `docs/plans/phase-4-rendering.md`.
 
 - [x] Phase 4 implementation plan.
-- [ ] **T1** — `mesh.hpp`: `MeshVertex` / `ChunkMesh` + `impl::greedy_mesh`
-      (grid-level greedy meshing, hidden-face culling, attribute merge keys).
-- [ ] **T2** — `mesh_chunk(world, chunk_position, is_solid)` — apron sampling
-      via seqlock snapshots + cross-chunk face culling.
-- [ ] **T3** — `mesh_chunk_lod(world, chunk_position, level, is_solid)` —
-      macro-block downsampling (any-solid, first-solid attributes).
-- [ ] **T4** — raylib render demo in `src/main.cpp` (mesh → `Mesh` → `DrawModel`).
-- [ ] **T5** — umbrella + docs + sweep.
+- [x] **T1** — `mesh.hpp`: `MeshVertex` / `ChunkMesh` / `MeshSample` +
+      `greedy_mesh` (0fps greedy meshing, hidden-face culling,
+      `(block_id, brightness)` merge keys, CCW winding).
+- [x] **T2** — `mesh_chunk(world, chunk_position, is_solid)` — `34³` apron
+      sampled via seqlock snapshots; cross-chunk face culling; absent chunk = air.
+- [x] **T3** — `mesh_chunk_lod(world, chunk_position, level, is_solid)` —
+      any-solid macro-cells, first-solid attributes, quads scaled by `1 << level`.
+- [x] **T4** — raylib render demo in `src/main.cpp` (ChunkMesh → `Mesh` →
+      `DrawModel` under an orbital camera; prints vertex / triangle counts).
+- [x] **T5** — umbrella + `ARCHITECTURE_SPEC` §4 + this file; suite 63/63.
 
-Output is renderer-neutral (chunk-local `f32` vertices; raylib stays in the
-demo). Deferrals (see plan): AO, atlas UVs, non-cube blocks, transparency,
-incremental remesh / mesh cache, LOD seam stitching, threaded meshing.
+Output is renderer-neutral (chunk-local `f32` vertices; raylib only in the demo).
+Deferrals moved to the backlog: AO, atlas UVs, non-cube blocks, transparency,
+incremental remesh / mesh cache, LOD seam stitching, threaded meshing, apron
+sampler chunk-pointer caching.
 
 ---
 
@@ -158,3 +166,14 @@ incremental remesh / mesh cache, LOD seam stitching, threaded meshing.
       axis but resolves axes in a fixed X→Y→Z order; add conservative
       advancement / a swept test for fast diagonal movers if needed.
 - [ ] **Sphere / capsule casts** (deferred from Phase 3).
+- [ ] **Meshing follow-ups** (deferred from Phase 4): per-vertex ambient
+      occlusion (part of the merge key, or it breaks merging); texture-atlas UVs
+      (`block_id → atlas rect`, needs `Block` texture data); non-cube block shapes
+      from `HotCellAttribute` pitch/yaw; a transparent / cutout pass; dirty-flag
+      incremental remesh + a per-`ChunkPosition` mesh cache; LOD seam stitching
+      (skirts / transition cells between adjacent levels); run `mesh_chunk` on a
+      worker pool; cache the ≤27 chunk pointers the apron sampler touches instead
+      of a `find_chunk` per cell.
+- [ ] **Move the demo's `ChunkMesh → raylib::Mesh` bridge** into an optional
+      `cellulose/raylib.hpp` (guarded, opt-in) if consumers want it — currently
+      it lives only in `src/main.cpp`.

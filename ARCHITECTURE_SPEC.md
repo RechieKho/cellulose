@@ -252,11 +252,30 @@ solidity predicate (needs `Block` to gain a solidity flag).
 
 ---
 
-## 4. Rendering Pipeline — **designed, not built**
+## 4. Rendering Pipeline — **implemented** (plan: `docs/plans/phase-4-rendering.md`)
 
-- **Greedy meshing** to generate optimized mesh geometry from spatial data.
-- **Level of Detail (LOD):** downsample voxel clusters into macro-blocks to
-  extend effective render distance efficiently.
+Renderer-neutral triangle geometry from chunk voxel data (`mesh.hpp`). No raylib
+in the core — the demo (`src/main.cpp`) does the `ChunkMesh → raylib::Mesh` bridge.
+
+**Output types:** `MeshVertex{ Vec3 position; Vec3 normal; f32 u, v; f32 brightness; u32 block_id; }`
+(positions chunk-local in `[0, chunk_edge_length]`; `u`/`v` are tile-space, `[0, w]×[0, h]`);
+`ChunkMesh{ vertices, indices }` (index triples, CCW-front).
+
+| Function (`namespace cellulose`) | Behaviour |
+|----------------------------------|-----------|
+| `greedy_mesh(MeshSample apron grid, size, block_scale) -> ChunkMesh` | The 0fps greedy mesher on a pre-sampled `(size+2)³` grid: per face direction and slice, build a `(block_id << 8 \| brightness) + 1` key mask (a face is skipped where its neighbour is solid), merge maximal rectangles, emit one quad each, scaled by `block_scale`. |
+| `mesh_chunk(world, chunk_position, is_solid) -> ChunkMesh` | Samples the `34³` apron via `Chunk::read_hot` snapshots (absent neighbour chunk ⇒ empty ⇒ boundary face kept), then `greedy_mesh(…, 32, 1)`. |
+| `mesh_chunk_lod(world, chunk_position, level, is_solid) -> ChunkMesh` | `level` 0–5: merges each `(1 << level)³` cell block into one macro-cell — **solid if any** cell is, attributes from the **first solid** cell — then greedy-meshes the `32 >> level` grid with `block_scale = 1 << level` (still spans `[0, 32]`). `level 0` ≡ `mesh_chunk`. |
+
+**Merge key** = `(block_id, that-face's 2-bit brightness)` — brightness
+differences stay visible; `HotCellAttribute` pitch/yaw orientation bits are not
+consumed yet (cubes only).
+
+**Deferred:** ambient occlusion; texture-atlas UV mapping (`block_id → atlas
+rect`); non-cube block shapes (orientation bits); transparent / cutout pass;
+incremental remesh + per-chunk mesh cache; LOD seam stitching; threaded meshing
+(the mesher already only needs seqlock read access). Also: the apron sampler does
+one `find_chunk` per cell — cache the ≤27 touched chunk pointers.
 
 ---
 
@@ -291,6 +310,9 @@ solidity predicate (needs `Block` to gain a solidity flag).
 | §3 | queries take a `bool(HotCellAttribute)` predicate; no built-in solidity; cells read as seqlock snapshots |
 | §3 | `raycast` = Amanatides & Woo DDA; `move_aabb` = axis-separated swept "collide and slide" |
 | §3 | `vector.hpp` (`Vector3<T>`, `Aabb`) is raylib-free — keeps C2 open |
+| §4 | mesher output is renderer-neutral (`MeshVertex` / `ChunkMesh`); raylib bridge lives only in the demo |
+| §4 | greedy meshing with `(block_id, face-brightness)` merge keys + hidden-face culling; cubes only (orientation bits unused) |
+| §4 | LOD = any-solid macro-cells, first-solid attributes, quads scaled by `1 << level` |
 
 ## Known follow-ups (cross-cutting, not tied to one subsystem)
 
