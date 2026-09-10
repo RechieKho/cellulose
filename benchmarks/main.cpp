@@ -15,6 +15,7 @@ using ScenarioFn = void (*)(const Config &);
 const std::map<std::string, ScenarioFn> registry{
 	{ "noop", cellbench::run_noop },
 	{ "seqlock", cellbench::run_seqlock },
+	{ "rwlock", cellbench::run_rwlock },
 };
 
 auto require_release() -> void {

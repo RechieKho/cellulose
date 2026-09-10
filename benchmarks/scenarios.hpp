@@ -27,6 +27,7 @@ struct Config final {
 // One entry point per benchmark file. `main.cpp` maps CLI names to these.
 auto run_noop(const Config &p_config) -> void; // harness self-test
 auto run_seqlock(const Config &p_config) -> void; // B1, B2
+auto run_rwlock(const Config &p_config) -> void; // B3
 
 } //namespace cellbench
 
