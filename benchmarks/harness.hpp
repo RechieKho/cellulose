@@ -94,6 +94,7 @@ struct ThreadContext final {
 	std::atomic<u64> ops{ 0 };
 	Histogram latency; //!< thread-owned; only read after the thread joins
 	const std::atomic<bool> *measuring = nullptr;
+	int index = 0; //!< 0-based index of this thread within its role
 
 	auto tick() -> void { ops.fetch_add(1, std::memory_order_relaxed); }
 	auto record(u64 p_ns) -> void {
@@ -145,6 +146,7 @@ inline auto run(std::chrono::milliseconds p_duration, std::chrono::milliseconds 
 		for (int t = begin; t < end; ++t) {
 			ThreadContext &context = contexts[static_cast<std::size_t>(t)];
 			context.measuring = &measuring;
+			context.index = t - begin;
 			threads.emplace_back([&, body = p_roles[r].body] { body(stop, context); });
 		}
 	}

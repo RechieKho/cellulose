@@ -17,7 +17,7 @@ struct Config final {
 	int meshers = 0;
 	int editors = 0;
 	int streamers = 0;
-	int chunks = 256;
+	int chunks = 1024;
 
 	bool csv = false;
 	bool single = false; //!< run one config from the flags above, not the default sweep
@@ -28,6 +28,7 @@ struct Config final {
 auto run_noop(const Config &p_config) -> void; // harness self-test
 auto run_seqlock(const Config &p_config) -> void; // B1, B2
 auto run_rwlock(const Config &p_config) -> void; // B3
+auto run_world(const Config &p_config) -> void; // B4, B5
 
 } //namespace cellbench
 
