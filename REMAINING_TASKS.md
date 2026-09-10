@@ -198,10 +198,18 @@ Design decisions D1–D10 (from the design review) and their triggers are in
       mesher it is an opt-in flag with AO in the merge key, never default.
 - [x] **Non-cube block shapes (D7) — won't do.** Greedy meshing is a cube
       optimisation; a block-model system belongs in the consumer's engine.
+- [x] **Bitwise / SIMD greedy meshing — won't do.** The binary-greedy-meshing
+      technique (~30× faster) needs a linear column-major layout so 64 cells pack
+      into one `u64`. `cellulose` stores the hot array **Morton-ordered** for
+      spatial-query / physics locality — the primary use case — and a de-Morton
+      pass plus per-`(block_id, brightness)` masks would erode most of the win.
+      The scalar mesher (~block-mesh-rs ballpark) is the deliberate balance. Not
+      concurrency-limited — the mesher runs lock-free on a thread-local buffer.
 - [ ] **Other meshing follow-ups:** texture-atlas UVs (`block_id → atlas rect`,
       needs `Block` texture data); a per-`ChunkPosition` `ChunkMeshCache` using
       `revision()`; LOD seam stitching (skirts between adjacent levels); run
-      `mesh_chunk` on a worker pool; a bulk per-chunk `read_hot`.
+      `mesh_chunk` on a worker pool; a bulk per-chunk `read_hot` (one seqlock
+      acquire + copy instead of per-cell).
 - [x] **`ChunkMesh → raylib::Mesh` bridge** moved to an opt-in
       `cellulose/raylib.hpp` (not in the umbrella; include it with raylib on the
       link line). `to_raylib_mesh(mesh, color_fn)` + a grayscale default; the demo

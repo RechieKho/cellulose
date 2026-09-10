@@ -296,6 +296,12 @@ looks at neighbours.
 CPO; flat for a hot type without it). Cubes only — `HotCellAttribute` pitch/yaw
 orientation bits are unused.
 
+The mesher is **scalar by design**. Binary-greedy-meshing (packing 64 cells into
+a `u64` for bit-parallel culling/merging, ~30× faster) needs a linear
+column-major layout; the hot array is **Morton-ordered** for spatial-query /
+physics locality, which is the primary workload. Trading that for a faster mesher
+is the wrong balance for this library.
+
 The apron sampler (and `raycast` / `move_aabb`) walk cells through
 `impl::ChunkCursor` (`cursor.hpp`), which caches the current chunk pointer so a
 run of same-chunk cells costs one `find_chunk` / directory-lock, not one per cell.
