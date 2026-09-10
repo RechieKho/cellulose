@@ -186,6 +186,13 @@ stricter. Two classes of thing that bit here and will bite again:
     (from `atlas.rect_of(0)` extent). Non-uniform packed atlases need a custom
     shader. Use `NEAREST` filter + `CLAMP` wrap on the texture.
 
+15. **`World` directory is sharded** (`shard_count = 16`, `world.hpp`). Single-shard
+    ops route by `ChunkPositionHash & 15`; `for_each_chunk` / `chunk_count` touch
+    all shards — `for_each_chunk` holds `shard_count` shared locks at once, so a
+    visitor that calls back into `world.chunk()` deadlocks (same hazard as the
+    old single mutex). `sample_chunk` reads the centre chunk via one
+    `Chunk::snapshot_hot` and the apron via `ChunkCursor` — two paths on purpose.
+
 ---
 
 ## TODOs / backlog
@@ -197,10 +204,9 @@ stricter. Two classes of thing that bit here and will bite again:
   reviews were clean).
 - `ChunkMeshCache` — optional module: dirty set keyed by `ChunkPosition` using
   `Chunk::revision()`, remesh dirty chunks + their 6 face neighbours.
-- Bulk per-chunk `read_hot` — one seqlock acquisition + sub-range copy instead of
-  per-cell, for `for_each_cell_in_aabb` / the mesher apron.
 - LOD seam stitching (skirts between adjacent-level chunks).
-- Threaded meshing (`mesh_chunk` on a worker pool — it only needs read access).
+- Threaded meshing (`mesh_chunk` on a worker pool — read side is already
+  lock-light via `Chunk::snapshot_hot`).
 
 **Adopted from the benchmark verdicts:** D3 (strict `atomic_ref` hot tier — now
 the default, gotcha 5) and D5 (sharded `World` directory — `world.hpp`,

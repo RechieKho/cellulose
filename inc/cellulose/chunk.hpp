@@ -8,6 +8,7 @@
 #include "seqlock.hpp"
 #include "sync.hpp"
 #include "types.hpp"
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <mutex>
@@ -194,6 +195,24 @@ public:
 	auto write_sparse(WriteFn &&p_write) -> void {
 		m_sparse_lock->write([&] { p_write(m_sparse); });
 		bump_revision();
+	}
+
+	/// @brief Copy the whole hot array into `p_out` (`chunk_cell_count` elements,
+	/// Morton order) under **one** hot-seqlock acquisition — the bulk counterpart
+	/// to per-cell `read_hot`, for a threaded mesher, persistence or networking
+	/// that wants a consistent snapshot without ~32 k lock trips. A torn copy is
+	/// discarded and retried, so `p_out` must tolerate being overwritten more than
+	/// once.
+	auto snapshot_hot(HotType *p_out) const -> void {
+		m_hot_lock->sequence.read([&] {
+#ifdef CELLULOSE_STRICT_ATOMICS
+			const impl::AtomicReadView<HotType> view{ m_hot.data() };
+			for (size i = 0; i < chunk_cell_count; ++i)
+				p_out[i] = view[i];
+#else
+			std::copy_n(m_hot.data(), chunk_cell_count, p_out);
+#endif
+		});
 	}
 
 	/// @brief Monotonic change counter; advances on every `write_*` (conservatively).

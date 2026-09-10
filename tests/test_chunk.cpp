@@ -88,6 +88,25 @@ TEST_CASE("functor accessors round-trip each tier under its lock") {
 	CHECK(present);
 }
 
+TEST_CASE("snapshot_hot copies the whole Morton array under one acquisition") {
+	cellulose::Chunk<> chunk;
+	chunk.write_hot([](auto &hot) {
+		hot[0] = cellulose::HotCellAttribute{ 5, 0 };
+		hot[cellulose::chunk_cell_count - 1] = cellulose::HotCellAttribute{ 9, 0 };
+	});
+
+	std::array<cellulose::HotCellAttribute, cellulose::chunk_cell_count> out{};
+	chunk.snapshot_hot(out.data());
+
+	CHECK(out[0].block_id == 5);
+	CHECK(out[cellulose::chunk_cell_count - 1].block_id == 9);
+	CHECK(out[1].block_id == 0);
+
+	const auto index = cellulose::encode_cell_index(cellulose::LocalPosition{ 7, 8, 9 });
+	CHECK(out[index].block_id ==
+			chunk.read_hot([&](const auto &hot) { return hot[index].block_id; }));
+}
+
 TEST_CASE("revision advances on every write and not on reads") {
 	cellulose::Chunk<> chunk;
 	CHECK(chunk.revision() == 0);

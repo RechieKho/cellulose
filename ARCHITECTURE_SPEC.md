@@ -116,6 +116,7 @@ flat-shaded when a custom type provides no overload).
 | `read_hot(fn) const` / `write_hot(fn)` | run `fn` over the hot `std::array<HotType>` under the hot seqlock — **the concurrent path** |
 | `read_cold(fn) const` / `write_cold(fn)` | run `fn` over the packed collection under the cold seqlock |
 | `read_sparse(fn) const` / `write_sparse(fn)` | run `fn` over the sparse collection under the sparse `RWLock` |
+| `snapshot_hot(HotType* out) const` | copy the whole hot array (`chunk_cell_count`, Morton order) under **one** seqlock acquisition — the bulk read for meshing / persistence / a threaded mesher |
 | `revision() const -> u64` | monotonic change counter, bumped by every `write_*` (conservative — bumps on no-op writes); a dirty signal for meshing / networking / persistence |
 | `hot_attribute(LocalPosition\|CellIndex) -> HotType&` | address one cell — **unsynchronised**, single-threaded / caller-locked only |
 | `fill_hot(const HotType&)`, `packed()`, `sparse()` | unsynchronised direct access |
@@ -295,7 +296,8 @@ include it with raylib linked): `to_raylib_mesh(ChunkMesh, color_fn) -> Mesh`.
 | `mesh_chunk(world, cp, has_geometry, is_hidden) -> ChunkMesh` | General form: `has_geometry(attr)` decides whether a cell emits faces, `is_hidden(near, far)` decides face culling — for transparency / cutout (e.g. water-vs-water hidden, water-vs-glass not). |
 | `mesh_chunk_lod(world, cp, level, …)` | `level` 0–5 (3-arg and 4-arg rule forms): merges each `(1 << level)³` block into one macro-cell (geometry if any cell has it, attributes from the first) then greedy-meshes the `32 >> level` grid with `block_scale = 1 << level`. `level 0` ≡ `mesh_chunk`. |
 
-`impl::sample_chunk` builds the `n³` grid from `Chunk::read_hot` snapshots (an
+`impl::sample_chunk` builds the `n³` grid from one `Chunk::snapshot_hot` of the
+centre chunk plus `impl::ChunkCursor` per-cell reads for the 1-cell apron (an
 absent neighbour chunk is a default-constructed hot attribute), computing each
 `MeshSample::visible[face] = has_geometry(cell) && !is_hidden(cell, neighbour)` —
 so the culling decision lives where the attributes are, and `greedy_mesh` never

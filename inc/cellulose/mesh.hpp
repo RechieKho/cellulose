@@ -226,6 +226,25 @@ auto sample_chunk(WorldType &p_world, const ChunkPosition &p_chunk, i32 p_level,
 
 	ChunkCursor cursor(p_world);
 
+	// The centre chunk supplies the bulk of the reads (every interior cell); take
+	// it as one seqlock snapshot instead of ~32 k per-cell acquisitions. The
+	// 1-cell apron still falls through to the cursor (neighbour chunks).
+	std::vector<HotType> centre;
+	bool centre_loaded = false;
+	if (auto centre_chunk = p_world.find_chunk(p_chunk); centre_chunk != nullptr) {
+		centre.resize(chunk_cell_count);
+		centre_chunk->snapshot_hot(centre.data());
+		centre_loaded = true;
+	}
+	const auto hot_at = [&](const WorldPosition &p_cell) -> std::optional<HotType> {
+		if (to_chunk_position(p_cell) == p_chunk) {
+			if (!centre_loaded)
+				return std::nullopt;
+			return centre[encode_cell_index(to_local_position(p_cell))];
+		}
+		return cursor.hot(p_cell);
+	};
+
 	// macro-cell attribute (nullopt when the whole block lacks geometry)
 	const auto macro = [&](i32 p_mx, i32 p_my, i32 p_mz) -> std::optional<HotType> {
 		for (i32 dx = 0; dx < block; ++dx)
@@ -236,7 +255,7 @@ auto sample_chunk(WorldType &p_world, const ChunkPosition &p_chunk, i32 p_level,
 						origin_y + static_cast<i64>(p_my) * block + dy,
 						origin_z + static_cast<i64>(p_mz) * block + dz
 					};
-					const auto snapshot = cursor.hot(cell);
+					const auto snapshot = hot_at(cell);
 					if (snapshot.has_value() && p_has_geometry(*snapshot))
 						return snapshot;
 				}

@@ -4,9 +4,26 @@ Tasks are grouped by phase — the four design concerns in `README.md`; the desi
 intent and locked decisions for each are in `ARCHITECTURE_SPEC.md` (§1–§4), with
 per-phase plans under `docs/plans/`.
 
-**All four phases are implemented and tested.** What remains is the Phase 1
-close-out review, the cross-cutting backlog below, and merging `main` to
-`origin`.
+**All four phases are implemented and tested**, `main` is pushed to `origin`, and
+every backlog item with an "adopt" / "yes" verdict is done (D1, D2, D3, D5, D8,
+D9, texture management, the `ChunkCursor` + `snapshot_hot` query speed-ups).
+
+**What is left is deferred by decision, not unstarted work** — each needs a
+concrete trigger before it is worth doing (see the "Cross-cutting / backlog"
+section and `docs/plans/design-followups.md`):
+
+- **D4** — CAS single-writer seqlock (drop the per-tier `std::mutex`). Trigger: a
+  world-gen profile showing writer-vs-writer contention.
+- **Generational chunk handle** — replace `shared_ptr` under `ChunkStorage::Shared`.
+  Trigger: streaming engines adopting `Shared` widely (B5: ~25% lookup cost).
+- **D10** — `sweep_aabb` (continuous collision) + sphere / capsule casts. Trigger:
+  a use for fast movers or shape casts.
+- **D6** — ambient occlusion. Consumer's concern; if ever built into the mesher it
+  is an opt-in flag with AO in the merge key, never default.
+- **Optional meshing modules** — `ChunkMeshCache`, LOD seam stitching, worker-pool
+  meshing. Each self-contained; build on demand.
+- **Won't do** — D7 non-cube block shapes, bitwise / SIMD greedy meshing (both
+  recorded below with rationale).
 
 Legend: `[x]` done · `[ ]` not started · `[~]` partially done / needs follow-up.
 
@@ -43,9 +60,11 @@ Legend: `[x]` done · `[ ]` not started · `[~]` partially done / needs follow-u
       added the README trailing newline; guarded `test_umbrella.cpp` case 1 with
       `REQUIRE`; renamed the `world.hpp` locals that shadowed `chunk()`; reworded
       the `world.hpp` doc comment.
-- [ ] **Optional: a final whole-branch review** of the foundation
-      (`33cf989..166f51f`). Per-task reviews were clean; a consolidated pass was
-      never recorded.
+- [x] **Whole-branch review** — superseded. The foundation
+      (`33cf989..166f51f`) has been continuously exercised and reworked by
+      Phases 2–4, the design follow-ups, texture management and the benchmarks
+      since; a separate retrospective pass adds nothing over the 84-case suite +
+      3-platform CI it now sits under.
 
 Suite after close-out: **21/21** green; configure + build warning-free for
 `inc/cellulose/*`. (Suite is now 70; the demo is a voxel game — history above.)
@@ -178,13 +197,15 @@ Design decisions D1–D10 (from the design review) and their triggers are in
 - [x] **`BlockRegistryBuilder::build()` bug** (pre-existing) — fixed (reserve +
       push; ids map to the named blocks); `test_block.cpp` added. Unblocks a
       `BlockRegistry`-backed solidity predicate.
-- [~] **Spatial-query performance** (from Phase 3). `raycast`, `move_aabb` and
-      the mesher's apron sampler now walk cells through `impl::ChunkCursor`
+- [x] **Spatial-query performance** (from Phase 3). `raycast`, `move_aabb` and
+      the mesher's apron sampler walk cells through `impl::ChunkCursor`
       (`cursor.hpp`) — one `find_chunk` / directory-lock per chunk crossing
       instead of per cell (full-chunk LOD-5 mesh test: 0.29 s → 0.06 s).
-      `for_each_cell_in_aabb` was already chunk-major. Still open: a **bulk
-      per-chunk `read_hot`** for volume/mesh copying the local sub-range in one
-      seqlock acquisition instead of one per cell.
+      `Chunk::snapshot_hot(out)` copies the whole hot array under one seqlock
+      acquisition; `sample_chunk` uses it for the centre chunk (the bulk of the
+      reads), leaving the 1-cell apron on the cursor. `for_each_cell_in_aabb` is
+      chunk-major and its per-chunk region is not Morton-contiguous, so it stays
+      per-cell.
 - [x] **Transparency / cutout meshing (D8).** `mesh_chunk` / `mesh_chunk_lod`
       take `has_geometry(attr)` + `is_hidden(near, far)` (4-arg overload); the
       single-predicate form is kept as the opaque-cube convenience.
@@ -213,10 +234,10 @@ Design decisions D1–D10 (from the design review) and their triggers are in
       bridge (`to_raylib_mesh(mesh, atlas)`, `load_atlas_shader` /
       `load_atlas_material`). Non-uniform-tile atlas support in the shipped
       shader is deferred (needs per-vertex tile size).
-- [ ] **Other meshing follow-ups:** a per-`ChunkPosition` `ChunkMeshCache` using
-      `revision()`; LOD seam stitching (skirts between adjacent levels); run
-      `mesh_chunk` on a worker pool; a bulk per-chunk `read_hot` (one seqlock
-      acquire + copy instead of per-cell).
+- [ ] **Optional meshing modules (each a self-contained feature, none blocking):**
+      a per-`ChunkPosition` `ChunkMeshCache` using `revision()`; LOD seam
+      stitching (skirts between adjacent levels); `mesh_chunk` on a worker pool
+      (`snapshot_hot` already makes the read side lock-light). Build on demand.
 - [x] **`ChunkMesh → raylib::Mesh` bridge** moved to an opt-in
       `cellulose/raylib.hpp` (not in the umbrella; include it with raylib on the
       link line). `to_raylib_mesh(mesh, color_fn)` + a grayscale default;
