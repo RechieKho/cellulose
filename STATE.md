@@ -194,6 +194,12 @@ stricter. Two classes of thing that bit here and will bite again:
     old single mutex). `sample_chunk` reads the centre chunk via one
     `Chunk::snapshot_hot` and the apron via `ChunkCursor` — two paths on purpose.
 
+16b. **`impl::face_layout[6]`** is the single source of truth for per-face merge
+    axes, texture orientation (side faces: `v=0` at world `+Y`, `u` left-to-right
+    from outside) and triangle winding. `emit_quad` takes a `FaceLayout`;
+    `sample_chunk`'s AO corner sampling reads the same table. Change the
+    convention *there*, not in scattered `(axis+1)%3` arithmetic.
+
 16. **AO is `MeshOptions{ .ambient_occlusion = true }`** (trailing arg on every
     `mesh_chunk` / `mesh_chunk_lod`). Adding it forced positive concept
     constraints — `impl::FaceHiddenRule` on the `(has_geometry, is_hidden)`

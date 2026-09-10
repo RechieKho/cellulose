@@ -285,7 +285,7 @@ in the core. `cellulose/raylib.hpp` is an **opt-in** bridge (not in the umbrella
 include it with raylib linked): `to_raylib_mesh(ChunkMesh, color_fn) -> Mesh`.
 
 **Output types:** `MeshVertex{ Vec3 position; Vec3 normal; f32 u, v; f32 brightness; u32 block_id; TextureID texture_id; f32 occlusion; }`
-(positions chunk-local in `[0, chunk_edge_length]`; `u`/`v` are tile-space, `[0, w]×[0, h]`;
+(positions chunk-local in `[0, chunk_edge_length]`; `u`/`v` are tile-space, `[0, w]×[0, h]`, oriented per `impl::face_layout` so `v = 0` is the top of a side face;
 `texture_id` is the render key — see §4.1; `occlusion` is `1.0` unless AO is enabled — see §4.2);
 `ChunkMesh{ vertices, indices }` (index triples, CCW-front).
 
@@ -303,6 +303,14 @@ absent neighbour chunk is a default-constructed hot attribute), computing each
 `MeshSample::visible[face] = has_geometry(cell) && !is_hidden(cell, neighbour)` —
 so the culling decision lives where the attributes are, and `greedy_mesh` never
 looks at neighbours.
+
+**Face convention.** `impl::face_layout[6]` fixes, per face, the in-plane merge
+axes and the texture orientation: for the four side faces `v = 0` is the top
+(world `+Y`) and `u` runs left-to-right viewed from outside, so a column texture
+(grass side, log) reads upright and un-mirrored on every side. Each face also
+carries which triangle winding makes its front point along `sign · axis`
+(`(axis_u, axis_v, axis)` is not always right-handed). `sample_chunk`'s AO corner
+sampling uses the same table so the 4 corner AO values line up with the quad.
 
 **Merge key** = `(that-face's texture id, that-face's brightness [, uniform AO
 level])` — the texture id (`§4.1`), **not** `block_id`, so two blocks that share a

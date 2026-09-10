@@ -149,24 +149,44 @@ TEST_CASE("differing face brightness prevents that face from merging") {
 	CHECK(mesh.vertices.size() == 28); // 7 quads
 }
 
-TEST_CASE("a +X quad is wound so its triangles face +X") {
+TEST_CASE("every face's triangles wind so the front points outward") {
 	Grid grid(8);
 	grid.set_solid(3, 3, 3);
 	const auto mesh = grid.mesh();
 
+	int checked = 0;
 	for (std::size_t t = 0; t + 2 < mesh.indices.size(); t += 3) {
 		const auto &a = mesh.vertices[mesh.indices[t]];
 		const auto &b = mesh.vertices[mesh.indices[t + 1]];
 		const auto &c = mesh.vertices[mesh.indices[t + 2]];
-		if (!(a.normal == cellulose::Vec3{ 1, 0, 0 }))
-			continue;
-		const auto face = cellulose::cross(b.position - a.position, c.position - a.position);
-		CHECK(face.x > 0.0f);
-		CHECK(face.y == doctest::Approx(0.0f));
-		CHECK(face.z == doctest::Approx(0.0f));
-		return;
+		const auto geo = cellulose::cross(b.position - a.position, c.position - a.position);
+		// the geometric normal must agree with the (outward) vertex normal
+		CHECK(cellulose::dot(geo, a.normal) > 0.0f);
+		++checked;
 	}
-	FAIL("no +X triangle found");
+	CHECK(checked == 12); // 6 faces, 2 triangles each
+}
+
+TEST_CASE("side faces texture with v=0 at the top and a consistent u direction") {
+	Grid grid(8);
+	grid.set_solid(3, 3, 3);
+	const auto mesh = grid.mesh();
+
+	for (const auto &normal : { cellulose::Vec3{ 1, 0, 0 }, cellulose::Vec3{ -1, 0, 0 },
+				 cellulose::Vec3{ 0, 0, 1 }, cellulose::Vec3{ 0, 0, -1 } }) {
+		float v_at_top = -1.0f;
+		float v_at_bottom = -1.0f;
+		for (const auto &vertex : mesh.vertices) {
+			if (!(vertex.normal == normal))
+				continue;
+			if (vertex.position.y == doctest::Approx(4.0f)) // cell spans y 3..4
+				v_at_top = vertex.v;
+			if (vertex.position.y == doctest::Approx(3.0f))
+				v_at_bottom = vertex.v;
+		}
+		CHECK(v_at_top == doctest::Approx(0.0f)); // texture top edge is world-up
+		CHECK(v_at_bottom == doctest::Approx(1.0f));
+	}
 }
 
 // --- World-backed meshing -----------------------------------------------------

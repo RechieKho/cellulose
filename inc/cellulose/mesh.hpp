@@ -67,15 +67,45 @@ struct MeshSample final {
 
 namespace impl {
 
+/// @brief Per-face geometry + texture convention.
+///
+/// `axis` / `sign` place the quad's plane; `axis_u` / `axis_v` are the in-plane
+/// world axes the mesher merges and textures along. `flip_u` / `flip_v` orient
+/// the texture so it reads upright and un-mirrored **viewed from outside** — for
+/// the four side faces that means `v = 0` at the top (world `+Y`) and `u` growing
+/// left-to-right, so a column texture (grass side, log bark) keeps its grass edge
+/// up on every side. `standard_winding` is the triangle order whose front face
+/// points along `sign * axis` (it alternates because `(axis_u, axis_v, axis)` is
+/// not always right-handed).
+struct FaceLayout final {
+	i32 axis;
+	i32 sign;
+	i32 axis_u;
+	i32 axis_v;
+	bool flip_u;
+	bool flip_v;
+	bool standard_winding;
+};
+
+//                       axis sign  u  v  flip_u flip_v std
+inline constexpr std::array<FaceLayout, 6> face_layout{
+	FaceLayout{ 0, +1, 2, 1, true, true, false }, // +X  right -Z, up +Y
+	FaceLayout{ 0, -1, 2, 1, false, true, true }, // -X  right +Z, up +Y
+	FaceLayout{ 1, +1, 0, 2, false, true, false }, // +Y  right +X
+	FaceLayout{ 1, -1, 0, 2, false, false, true }, // -Y  right +X
+	FaceLayout{ 2, +1, 0, 1, false, true, true }, // +Z  right +X, up +Y
+	FaceLayout{ 2, -1, 0, 1, true, true, false }, // -Z  right -X, up +Y
+};
+
 inline auto emit_quad(
-		ChunkMesh &p_mesh, i32 p_axis, i32 p_axis_u, i32 p_axis_v, i32 p_sign,
+		ChunkMesh &p_mesh, const FaceLayout &p_layout,
 		i32 p_slice, i32 p_u, i32 p_v, i32 p_width, i32 p_height,
 		f32 p_scale, u32 p_block_id, TextureID p_texture_id, f32 p_brightness,
 		const std::array<u8, 4> &p_corner_ao) -> void {
-	const f32 plane = static_cast<f32>(p_sign > 0 ? p_slice + 1 : p_slice) * p_scale;
+	const f32 plane = static_cast<f32>(p_layout.sign > 0 ? p_slice + 1 : p_slice) * p_scale;
 
 	Vec3 normal{ 0.0f, 0.0f, 0.0f };
-	normal[static_cast<size>(p_axis)] = static_cast<f32>(p_sign);
+	normal[static_cast<size>(p_layout.axis)] = static_cast<f32>(p_layout.sign);
 
 	const std::array<std::array<i32, 2>, 4> corners{
 		std::array<i32, 2>{ 0, 0 },
@@ -89,13 +119,15 @@ inline auto emit_quad(
 	for (size corner_index = 0; corner_index < 4; ++corner_index) {
 		const auto &corner = corners[corner_index];
 		Vec3 position{ 0.0f, 0.0f, 0.0f };
-		position[static_cast<size>(p_axis)] = plane;
-		position[static_cast<size>(p_axis_u)] = static_cast<f32>(p_u + corner[0]) * p_scale;
-		position[static_cast<size>(p_axis_v)] = static_cast<f32>(p_v + corner[1]) * p_scale;
+		position[static_cast<size>(p_layout.axis)] = plane;
+		position[static_cast<size>(p_layout.axis_u)] = static_cast<f32>(p_u + corner[0]) * p_scale;
+		position[static_cast<size>(p_layout.axis_v)] = static_cast<f32>(p_v + corner[1]) * p_scale;
+
+		const f32 tex_u = static_cast<f32>(p_layout.flip_u ? p_width - corner[0] : corner[0]);
+		const f32 tex_v = static_cast<f32>(p_layout.flip_v ? p_height - corner[1] : corner[1]);
 
 		p_mesh.vertices.push_back(MeshVertex{
-				position, normal,
-				static_cast<f32>(corner[0]), static_cast<f32>(corner[1]),
+				position, normal, tex_u, tex_v,
 				p_brightness, p_block_id, p_texture_id,
 				static_cast<f32>(p_corner_ao[corner_index]) / 3.0f });
 	}
@@ -103,11 +135,11 @@ inline auto emit_quad(
 	// Split the quad along whichever diagonal keeps the darker pair together — the
 	// 0fps flip — so an anisotropic AO gradient doesn't fan out asymmetrically.
 	const bool flip = (p_corner_ao[0] + p_corner_ao[2]) > (p_corner_ao[1] + p_corner_ao[3]);
-	std::array<u32, 6> winding = p_sign > 0
+	std::array<u32, 6> winding = p_layout.standard_winding
 			? std::array<u32, 6>{ 0, 1, 2, 0, 2, 3 }
 			: std::array<u32, 6>{ 0, 2, 1, 0, 3, 2 };
 	if (flip)
-		winding = p_sign > 0
+		winding = p_layout.standard_winding
 				? std::array<u32, 6>{ 1, 2, 3, 1, 3, 0 }
 				: std::array<u32, 6>{ 1, 3, 2, 1, 0, 3 };
 	for (const u32 offset : winding)
@@ -142,10 +174,10 @@ inline auto greedy_mesh(const std::vector<MeshSample> &p_samples, i32 p_size, f3
 	};
 
 	for (i32 face = 0; face < 6; ++face) {
-		const i32 axis = face / 2;
-		const i32 sign = (face % 2 == 0) ? 1 : -1;
-		const i32 axis_u = (axis + 1) % 3;
-		const i32 axis_v = (axis + 2) % 3;
+		const impl::FaceLayout &layout = impl::face_layout[static_cast<size>(face)];
+		const i32 axis = layout.axis;
+		const i32 axis_u = layout.axis_u;
+		const i32 axis_v = layout.axis_v;
 
 		// Merge key folds in the face's resolved texture id (array layer), its
 		// brightness and (when enabled) its uniform AO level — never the block id,
@@ -191,7 +223,7 @@ inline auto greedy_mesh(const std::vector<MeshSample> &p_samples, i32 p_size, f3
 					} else {
 						// non-mergeable: emit now, leave the mask cell empty
 						impl::emit_quad(
-								mesh, axis, axis_u, axis_v, sign, slice, uu, vv, 1, 1,
+								mesh, layout, slice, uu, vv, 1, 1,
 								p_block_scale, sample.block_id, texture,
 								static_cast<f32>(brightness) / 3.0f, corner_ao);
 						keys[mask_index] = 0;
@@ -237,7 +269,7 @@ inline auto greedy_mesh(const std::vector<MeshSample> &p_samples, i32 p_size, f3
 					}
 
 					impl::emit_quad(
-							mesh, axis, axis_u, axis_v, sign, slice, uu, vv, width, height,
+							mesh, layout, slice, uu, vv, width, height,
 							p_block_scale, block_id, texture, brightness, corner_ao);
 
 					for (i32 y = 0; y < height; ++y)
@@ -384,9 +416,10 @@ auto sample_chunk(WorldType &p_world, const ChunkPosition &p_chunk, i32 p_level,
 					if (!ambient_occlusion || !out.visible[fi])
 						continue;
 
-					const i32 axis = face / 2;
-					const i32 axis_u = (axis + 1) % 3;
-					const i32 axis_v = (axis + 2) % 3;
+					// Same in-plane axes emit_quad textures/merges along, so the 4
+					// corner AO values line up with the emitted quad's corners.
+					const i32 axis_u = impl::face_layout[fi].axis_u;
+					const i32 axis_v = impl::face_layout[fi].axis_v;
 					const std::array<i32, 3> base{
 						x + face_offset[fi][0], y + face_offset[fi][1], z + face_offset[fi][2]
 					};
