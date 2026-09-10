@@ -1,6 +1,6 @@
 #include <raylib.h>
 #include <cellulose/cellulose.hpp>
-#include <cstdint>
+#include <cellulose/raylib.hpp>
 #include <iostream>
 
 namespace {
@@ -8,6 +8,18 @@ namespace {
 // Solidity predicate for the demo: any non-air block.
 auto is_solid(const cellulose::HotCellAttribute &p_attribute) -> bool {
 	return p_attribute.block_id != 0;
+}
+
+// Demo palette: block 1 greenish, others blue-grey, shaded by face brightness.
+auto demo_color(const cellulose::MeshVertex &p_vertex) -> Color {
+	const float shade = 0.35f + 0.65f * p_vertex.brightness;
+	const bool ground = p_vertex.block_id == 1;
+	return Color{
+		static_cast<unsigned char>((ground ? 150.0f : 90.0f) * shade),
+		static_cast<unsigned char>((ground ? 190.0f : 130.0f) * shade),
+		static_cast<unsigned char>((ground ? 120.0f : 200.0f) * shade),
+		255
+	};
 }
 
 // Place a fully-lit block, optionally dimming its top face for a little contrast.
@@ -21,47 +33,6 @@ auto place(cellulose::World<> &p_world, int p_x, int p_y, int p_z, cellulose::Bl
 	attribute.set_bottom_face_brightness(1);
 	attribute.set_back_face_brightness(2);
 	attribute.set_front_face_brightness(2);
-}
-
-// Convert a cellulose::ChunkMesh into a raylib Mesh (raylib owns the buffers).
-auto to_raylib_mesh(const cellulose::ChunkMesh &p_mesh) -> Mesh {
-	Mesh mesh = { 0 };
-	mesh.vertexCount = static_cast<int>(p_mesh.vertices.size());
-	mesh.triangleCount = static_cast<int>(p_mesh.indices.size() / 3);
-
-	mesh.vertices = static_cast<float *>(MemAlloc(sizeof(float) * 3 * mesh.vertexCount));
-	mesh.normals = static_cast<float *>(MemAlloc(sizeof(float) * 3 * mesh.vertexCount));
-	mesh.texcoords = static_cast<float *>(MemAlloc(sizeof(float) * 2 * mesh.vertexCount));
-	mesh.colors = static_cast<unsigned char *>(MemAlloc(sizeof(unsigned char) * 4 * mesh.vertexCount));
-	mesh.indices = static_cast<unsigned short *>(MemAlloc(sizeof(unsigned short) * 3 * mesh.triangleCount));
-
-	for (int i = 0; i < mesh.vertexCount; ++i) {
-		const auto &vertex = p_mesh.vertices[static_cast<std::size_t>(i)];
-		mesh.vertices[i * 3 + 0] = vertex.position.x;
-		mesh.vertices[i * 3 + 1] = vertex.position.y;
-		mesh.vertices[i * 3 + 2] = vertex.position.z;
-		mesh.normals[i * 3 + 0] = vertex.normal.x;
-		mesh.normals[i * 3 + 1] = vertex.normal.y;
-		mesh.normals[i * 3 + 2] = vertex.normal.z;
-		mesh.texcoords[i * 2 + 0] = vertex.u;
-		mesh.texcoords[i * 2 + 1] = vertex.v;
-
-		// Tint by block id, shade by face brightness (0.35 .. 1.0).
-		const float shade = 0.35f + 0.65f * vertex.brightness;
-		const unsigned char r = static_cast<unsigned char>((vertex.block_id == 1 ? 150.0f : 90.0f) * shade);
-		const unsigned char g = static_cast<unsigned char>((vertex.block_id == 1 ? 190.0f : 130.0f) * shade);
-		const unsigned char b = static_cast<unsigned char>((vertex.block_id == 1 ? 120.0f : 200.0f) * shade);
-		mesh.colors[i * 4 + 0] = r;
-		mesh.colors[i * 4 + 1] = g;
-		mesh.colors[i * 4 + 2] = b;
-		mesh.colors[i * 4 + 3] = 255;
-	}
-
-	for (std::size_t i = 0; i < p_mesh.indices.size(); ++i)
-		mesh.indices[i] = static_cast<unsigned short>(p_mesh.indices[i]);
-
-	UploadMesh(&mesh, false);
-	return mesh;
 }
 
 } //namespace
@@ -91,7 +62,7 @@ int main() {
 
 	InitWindow(screenWidth, screenHeight, "cellulose - greedy meshed chunk");
 
-	Mesh mesh = to_raylib_mesh(chunk_mesh);
+	Mesh mesh = cellulose::to_raylib_mesh(chunk_mesh, demo_color);
 	Model model = LoadModelFromMesh(mesh);
 
 	Camera3D camera = { 0 };

@@ -262,7 +262,8 @@ solidity predicate (needs `Block` to gain a solidity flag).
 ## 4. Rendering Pipeline — **implemented** (plan: `docs/plans/phase-4-rendering.md`)
 
 Renderer-neutral triangle geometry from chunk voxel data (`mesh.hpp`). No raylib
-in the core — the demo (`src/main.cpp`) does the `ChunkMesh → raylib::Mesh` bridge.
+in the core. `cellulose/raylib.hpp` is an **opt-in** bridge (not in the umbrella;
+include it with raylib linked): `to_raylib_mesh(ChunkMesh, color_fn) -> Mesh`.
 
 **Output types:** `MeshVertex{ Vec3 position; Vec3 normal; f32 u, v; f32 brightness; u32 block_id; }`
 (positions chunk-local in `[0, chunk_edge_length]`; `u`/`v` are tile-space, `[0, w]×[0, h]`);

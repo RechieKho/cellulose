@@ -175,6 +175,7 @@ sampler chunk-pointer caching.
       incremental remesh + a per-`ChunkPosition` mesh cache; LOD seam stitching
       (skirts / transition cells between adjacent levels); run `mesh_chunk` on a
       worker pool. (Apron `find_chunk`-per-cell is fixed — see `ChunkCursor`.)
-- [ ] **Move the demo's `ChunkMesh → raylib::Mesh` bridge** into an optional
-      `cellulose/raylib.hpp` (guarded, opt-in) if consumers want it — currently
-      it lives only in `src/main.cpp`.
+- [x] **`ChunkMesh → raylib::Mesh` bridge** moved to an opt-in
+      `cellulose/raylib.hpp` (not in the umbrella; include it with raylib on the
+      link line). `to_raylib_mesh(mesh, color_fn)` + a grayscale default; the demo
+      passes its own palette.
