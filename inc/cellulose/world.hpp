@@ -6,19 +6,17 @@
 #include "coordinate.hpp"
 #include "types.hpp"
 #include <ankerl/unordered_dense.h>
-#include <utility>
 
 namespace cellulose {
 
 namespace impl {
 
-/// @brief The set of loaded chunks, indexed by chunk coordinate in a Robin-Hood hash table.
+/// @brief The set of loaded chunks, indexed by chunk coordinate in a densely-stored hash table (`ankerl::unordered_dense`).
 template <typename ChunkType = Chunk<>>
 class World final {
-public:
+private:
 	using ChunkMap = ankerl::unordered_dense::map<ChunkPosition, ChunkType, ChunkPositionHash>;
 
-private:
 	ChunkMap m_chunks;
 
 public:
@@ -50,22 +48,22 @@ public:
 
 	template <typename Visitor>
 	auto for_each_chunk(Visitor &&p_visitor) -> void {
-		for (auto &[position, chunk] : m_chunks)
-			std::forward<Visitor>(p_visitor)(position, chunk);
+		for (auto &[position, stored_chunk] : m_chunks)
+			p_visitor(position, stored_chunk);
 	}
 
 	auto find_hot_attribute(const WorldPosition &p_world) -> cellulose::HotCellAttribute * {
-		auto *chunk = find_chunk(to_chunk_position(p_world));
-		if (chunk == nullptr)
+		auto *stored_chunk = find_chunk(to_chunk_position(p_world));
+		if (stored_chunk == nullptr)
 			return nullptr;
-		return &chunk->hot_attribute(to_local_position(p_world));
+		return &stored_chunk->hot_attribute(to_local_position(p_world));
 	}
 
 	auto find_hot_attribute(const WorldPosition &p_world) const -> const cellulose::HotCellAttribute * {
-		const auto *chunk = find_chunk(to_chunk_position(p_world));
-		if (chunk == nullptr)
+		const auto *stored_chunk = find_chunk(to_chunk_position(p_world));
+		if (stored_chunk == nullptr)
 			return nullptr;
-		return &chunk->hot_attribute(to_local_position(p_world));
+		return &stored_chunk->hot_attribute(to_local_position(p_world));
 	}
 };
 

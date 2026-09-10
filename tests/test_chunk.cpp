@@ -29,6 +29,19 @@ TEST_CASE("fill_hot writes every cell") {
 	CHECK(chunk.hot_attribute(cellulose::LocalPosition{ 31, 31, 31 }).block_id == 42);
 }
 
+TEST_CASE("hot attributes are writable by cell index and readable through a const chunk") {
+	cellulose::Chunk<> chunk;
+
+	const cellulose::LocalPosition position{ 12, 3, 30 };
+	const auto index = cellulose::encode_cell_index(position);
+	chunk.hot_attribute(index).block_id = 21;
+
+	const cellulose::Chunk<> &const_chunk = chunk;
+	CHECK(const_chunk.hot_attribute(index).block_id == 21);
+	CHECK(const_chunk.hot_attribute(position).block_id == 21);
+	CHECK(const_chunk.hot_attribute(cellulose::LocalPosition{ 0, 0, 0 }).block_id == 0);
+}
+
 TEST_CASE("chunk exposes its packed and sparse collections") {
 	cellulose::Chunk<
 			cellulose::PackedCellAttributeCollection<cellulose::chunk_cell_count, cellulose::u16>,

@@ -2,7 +2,6 @@
 #include <libmorton/morton.h>
 #include <raylib.h>
 #include <cellulose/cellulose.hpp>
-#include <cellulose/inspect.hpp>
 #include <iostream>
 
 int main() {

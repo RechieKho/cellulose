@@ -5,7 +5,9 @@
 TEST_CASE("umbrella header pulls in World and Chunk") {
 	cellulose::World<> world;
 	world.chunk(cellulose::ChunkPosition{ 0, 0, 0 }).fill_hot(cellulose::HotCellAttribute{ 1, 0 });
-	CHECK(world.find_hot_attribute(cellulose::WorldPosition{ 0, 0, 0 })->block_id == 1);
+	const auto *attribute = world.find_hot_attribute(cellulose::WorldPosition{ 0, 0, 0 });
+	REQUIRE(attribute != nullptr);
+	CHECK(attribute->block_id == 1);
 }
 
 TEST_CASE("const World resolves hot attributes through the const overloads") {

@@ -11,7 +11,7 @@ tracked in `REMAINING_TASKS.md`.
 - **Language / build:** C++20, CMake ≥ 3.10. `libcellulose` is a header-only
   `INTERFACE` target; all library code lives in headers under `inc/cellulose/`.
 - **Vendored deps:** `libmorton`, `ankerl::unordered_dense`, `fmt`, `raylib`
-  (submodules / FetchContent). Test dep: `doctest` v2.4.11 via FetchContent.
+  (submodules / FetchContent). Test dep: `doctest` v2.5.3 via FetchContent.
 - **Status:** subsystem 1 (Core Data Structure) is implemented and tested;
   subsystems 2–4 are designed but not built.
 
@@ -161,16 +161,16 @@ concurrency subsystem should evaluate `unordered_dense::segmented_map` or
 
 ### 1.7 Test harness (`tests/`, A11–A12)
 
-`doctest` v2.4.11 via FetchContent; one `cellulose_tests` binary from
-`GLOB_RECURSE tests/*.cpp CONFIGURE_DEPENDS`; `doctest_discover_tests` registers
-each `TEST_CASE` with CTest. `option(CELLULOSE_BUILD_TESTS …)` defaults ON only
-when `cellulose` is the top-level project. `tests/main.cpp` is the sole TU
+`doctest` v2.5.3 via FetchContent; one `cellulose_tests` binary from
+`GLOB tests/{main,test_*}.cpp CONFIGURE_DEPENDS`; `doctest_discover_tests`
+registers each `TEST_CASE` with CTest. `option(CELLULOSE_BUILD_TESTS …)` defaults
+ON only when `cellulose` is the top-level project. `tests/main.cpp` is the sole TU
 defining the doctest main.
 
-Known wart: doctest v2.4.11's `cmake_minimum_required(3.0)` is rejected by CMake
-4; the fetch is wrapped in a `block(SCOPE_FOR VARIABLES)` setting
-`CMAKE_POLICY_VERSION_MINIMUM 3.5` (scoped, does not leak). A configure-time
-deprecation warning still prints; `ctest` output is clean.
+(doctest was pinned at v2.4.11 during the foundation build, whose
+`cmake_minimum_required(3.0)` needed a scoped `CMAKE_POLICY_VERSION_MINIMUM`
+shim under CMake 4; v2.5.3 declares `3.14` and configures cleanly, so the shim
+was dropped.)
 
 ---
 
@@ -236,7 +236,7 @@ Three query types:
 | A8 | cold/freezing collection types default to *empty*; concrete types deferred |
 | A9 | `chunk()` = get-or-create; `find_chunk()` = lookup-only nullable |
 | A10 | `ChunkPositionHash` = avalanching, raw-byte wyhash over the 12 bytes |
-| A11 | tests = `doctest` v2.4.11, one binary, `doctest_discover_tests` |
+| A11 | tests = `doctest` (v2.5.3), one binary, `doctest_discover_tests` |
 | A12 | `CELLULOSE_BUILD_TESTS` defaults ON only top-level |
 | R1 | commits carry the two attribution trailers |
 | R2 | `coordinate.hpp` independent of `chunk.hpp`; literal `5`/`31` + comment |

@@ -22,29 +22,28 @@ Legend: `[x]` done · `[ ]` not started · `[~]` partially done / needs follow-u
 
 ### Phase 1 close-out (cleanups on the merged foundation)
 
-- [ ] **Run and record a final whole-branch review** of the foundation commits
-      (`33cf989..166f51f`). The per-task reviews were clean, but the planned
-      final review was never recorded.
-- [ ] **`world.hpp` `for_each_chunk`:** `std::forward<Visitor>(p_visitor)` is
-      re-forwarded on every loop iteration (move-only / stateful-rvalue visitor
-      footgun). Fix: call `p_visitor(position, chunk)` inside the loop.
-- [ ] **`world.hpp` `using ChunkMap`:** currently `public`, leaking the container
-      type into the API. Make it `private`.
-- [ ] **Const-overload coverage:** `find_chunk` const / `find_hot_attribute`
-      const are exercised only by the umbrella test's const-`World` case — keep
-      that, and add a `const Chunk` spot-check in `test_chunk.cpp`
-      (`hot_attribute` const overloads + `hot_attribute(CellIndex)` write path
-      are otherwise never instantiated).
-- [ ] **doctest deprecation warning:** decide whether to bump the pinned
-      `doctest` tag (v2.4.11 → a CMake-4-clean release) or keep the scoped
-      `CMAKE_POLICY_VERSION_MINIMUM` workaround.
-- [ ] **`tests/CMakeLists.txt` glob:** `GLOB_RECURSE` compiles *any* future
-      `.cpp` anywhere under `tests/` (including helper subdirs) into
-      `cellulose_tests` — tighten to `tests/test_*.cpp` if helper files are added.
-- [ ] Cosmetic (optional): `main.cpp` redundant `#include <cellulose/inspect.hpp>`;
-      README trailing newline; `test_umbrella.cpp` case 1 unguarded `->block_id`
-      deref; `world.hpp` local `chunk` shadowing member `chunk()`; `world.hpp`
-      doc comment "Robin-Hood hash table" (`unordered_dense` is dense/open-address).
+- [x] **`world.hpp` `for_each_chunk`:** no longer re-forwards the visitor per
+      iteration — calls `p_visitor(position, stored_chunk)` directly.
+- [x] **`world.hpp` `using ChunkMap`:** moved into the `private` section.
+- [x] **Const-overload coverage:** added a `const Chunk<>` spot-check in
+      `test_chunk.cpp` exercising the `hot_attribute` const overloads and the
+      `hot_attribute(CellIndex)` write path; the umbrella const-`World` case
+      stays.
+- [x] **doctest:** bumped `v2.4.11` → `v2.5.3` (declares
+      `cmake_minimum_required(3.14)`), dropped the scoped
+      `CMAKE_POLICY_VERSION_MINIMUM` shim — configure is now warning-free.
+- [x] **`tests/CMakeLists.txt` glob:** narrowed from `GLOB_RECURSE *.cpp` to a
+      non-recursive `main.cpp` + `test_*.cpp` list.
+- [x] Cosmetic: dropped `main.cpp`'s redundant `#include <cellulose/inspect.hpp>`;
+      added the README trailing newline; guarded `test_umbrella.cpp` case 1 with
+      `REQUIRE`; renamed the `world.hpp` locals that shadowed `chunk()`; reworded
+      the `world.hpp` doc comment.
+- [ ] **Optional: a final whole-branch review** of the foundation
+      (`33cf989..166f51f`). Per-task reviews were clean; a consolidated pass was
+      never recorded.
+
+Suite after close-out: **21/21** green; configure + build warning-free for
+`inc/cellulose/*`; demo prints `chunks loaded: 1` / `block at (1,2,3): 42`.
 
 ---
 
