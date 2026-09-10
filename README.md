@@ -62,11 +62,9 @@ The rendering pipeline generates optimized mesh geometry from spatial data using
 
 ## Implementation Status
 
-The **core data structure** — `Chunk` (Morton-coded per-cell storage) and `World`
-(chunk hash table) — and the **chunk-level concurrency layer** (per-tier sequence
-/ read-write locks, cache-line padding, `unique_ptr`-stable chunk pointers) are
-implemented and covered by the `cellulose_tests` suite (`ctest --test-dir build`).
-Concrete parameters and locked decisions are recorded in
-[`ARCHITECTURE_SPEC.md`](ARCHITECTURE_SPEC.md); outstanding work across all four
-subsystems is tracked in [`REMAINING_TASKS.md`](REMAINING_TASKS.md), with phase
-plans under [`docs/plans/`](docs/plans).
+All four subsystems above are implemented and covered by the `cellulose_tests`
+suite (`ctest --test-dir build`). The as-built design and every locked decision
+are in [`ARCHITECTURE_SPEC.md`](ARCHITECTURE_SPEC.md); outstanding work in
+[`REMAINING_TASKS.md`](REMAINING_TASKS.md); per-phase plans under
+[`docs/plans/`](docs/plans). **Contributors / agents: start with
+[`STATE.md`](STATE.md)** — build/test commands and the recurring gotchas.
