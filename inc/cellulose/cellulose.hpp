@@ -7,6 +7,7 @@
 #include "collision.hpp"
 #include "coordinate.hpp"
 #include "inspect.hpp"
+#include "mesh.hpp"
 #include "morton.hpp"
 #include "raycast.hpp"
 #include "rwlock.hpp"
