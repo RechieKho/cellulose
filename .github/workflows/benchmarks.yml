@@ -1,0 +1,39 @@
+name: Benchmarks
+
+# Manual only — concurrency benchmarks are measurement + a correctness cross-check,
+# not a per-push gate. Timing numbers from CI runners are noisy; treat them as
+# directional. The value here is the TSan / ASan run of the mixed workload.
+on:
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: release
+            flags: "-DCMAKE_BUILD_TYPE=Release"
+            run: "./build/benchmarks/cellulose_benchmarks --scenario all --duration-ms 1000"
+          - name: tsan
+            flags: "-DCMAKE_BUILD_TYPE=RelWithDebInfo -DCELLULOSE_SANITIZER=thread -DCELLULOSE_STRICT_ATOMICS=ON -DCELLULOSE_SEQLOCK_STATS=ON"
+            run: "TSAN_OPTIONS=halt_on_error=1 ./build/benchmarks/cellulose_benchmarks --scenario workload --duration-ms 2000"
+          - name: asan
+            flags: "-DCMAKE_BUILD_TYPE=RelWithDebInfo -DCELLULOSE_SANITIZER=address"
+            run: "ASAN_OPTIONS=halt_on_error=1 ./build/benchmarks/cellulose_benchmarks --scenario workload --duration-ms 2000"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y ninja-build cmake
+      - name: Configure
+        run: >
+          cmake -S . -B build -G Ninja
+          -DCELLULOSE_BUILD_BENCHMARKS=ON -DCELLULOSE_BUILD_TESTS=OFF
+          ${{ matrix.flags }}
+      - name: Build
+        run: ninja -C build cellulose_benchmarks
+      - name: Run (${{ matrix.name }})
+        run: ${{ matrix.run }}

@@ -30,6 +30,7 @@ auto run_seqlock(const Config &p_config) -> void; // B1, B2
 auto run_rwlock(const Config &p_config) -> void; // B3
 auto run_world(const Config &p_config) -> void; // B4, B5
 auto run_cursor(const Config &p_config) -> void; // B6
+auto run_workload(const Config &p_config) -> void; // B7
 
 } //namespace cellbench
 
