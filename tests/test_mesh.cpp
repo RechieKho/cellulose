@@ -307,3 +307,87 @@ TEST_CASE("mesh_chunk with explicit rules keeps a face between unlike transparen
 	CHECK(quads_facing(mesh, cellulose::Vec3{ 1, 0, 0 }) == 2);
 	CHECK(quads_facing(mesh, cellulose::Vec3{ -1, 0, 0 }) == 2);
 }
+
+// --- texture ids ------------------------------------------------------------
+
+TEST_CASE("without a resolver every vertex's texture_id is its block_id") {
+	cellulose::World<> world;
+	put(world, 5, 5, 5, 9);
+
+	const auto mesh = cellulose::mesh_chunk(world, { 0, 0, 0 }, world_solid());
+	CHECK(mesh.vertices.size() == 24);
+	for (const auto &vertex : mesh.vertices) {
+		CHECK(vertex.block_id == 9);
+		CHECK(vertex.texture_id == 9);
+	}
+}
+
+TEST_CASE("a texture resolver drives per-face texture_id and its own merge key") {
+	cellulose::World<> world;
+	// a 2x1 strip of "grass" on the XZ plane, so the +Y face is a mergeable run
+	put(world, 4, 4, 4, 1);
+	put(world, 5, 4, 4, 1);
+	// and a "dirt" block (id 2) touching in +X, sharing the side texture with grass
+	put(world, 6, 4, 4, 2);
+
+	// grass: top=10 side=11 bottom=12 ; dirt: all 11
+	const auto texture_of = [](const cellulose::HotCellAttribute &p_attribute, cellulose::i32 p_face) -> cellulose::TextureID {
+		if (p_attribute.block_id == 1)
+			return p_face == 2 ? 10u : (p_face == 3 ? 12u : 11u);
+		return 11u;
+	};
+
+	const auto mesh = cellulose::mesh_chunk(world, { 0, 0, 0 }, world_solid(), texture_of);
+
+	// +Y faces: grass tops use layer 10, dirt top uses layer 11
+	int grass_top = 0;
+	int dirt_top = 0;
+	for (const auto &vertex : mesh.vertices) {
+		if (!(vertex.normal == cellulose::Vec3{ 0, 1, 0 }))
+			continue;
+		if (vertex.texture_id == 10)
+			++grass_top;
+		else if (vertex.texture_id == 11)
+			++dirt_top;
+	}
+	CHECK(grass_top == 4); // the 2x1 grass run merged into one quad
+	CHECK(dirt_top == 4); // dirt's own top quad
+
+	// the -Z faces of all three blocks share layer 11 -> one merged quad
+	CHECK(quads_facing(mesh, cellulose::Vec3{ 0, 0, -1 }) == 1);
+}
+
+TEST_CASE("differing face texture prevents that face from merging") {
+	cellulose::World<> world;
+	put(world, 1, 1, 1, 1);
+	put(world, 2, 1, 1, 2); // distinct block ids
+
+	// every face shares layer 5 -> the whole surface merges as before
+	const auto uniform = [](const cellulose::HotCellAttribute &, cellulose::i32) -> cellulose::TextureID {
+		return 5u;
+	};
+	CHECK(quads_facing(
+				  cellulose::mesh_chunk(world, { 0, 0, 0 }, world_solid(), uniform),
+				  cellulose::Vec3{ 0, 1, 0 }) == 1);
+
+	// +Y layer differs by block id (100 vs 200); the other faces stay on layer 5
+	const auto split = [](const cellulose::HotCellAttribute &p_attribute, cellulose::i32 p_face) -> cellulose::TextureID {
+		return p_face == 2 ? static_cast<cellulose::TextureID>(p_attribute.block_id * 100) : 5u;
+	};
+	const auto mesh = cellulose::mesh_chunk(world, { 0, 0, 0 }, world_solid(), split);
+	CHECK(quads_facing(mesh, cellulose::Vec3{ 0, 1, 0 }) == 2); // +Y split
+	CHECK(quads_facing(mesh, cellulose::Vec3{ 0, -1, 0 }) == 1); // -Y still merged
+}
+
+TEST_CASE("mesh_chunk_lod accepts a texture resolver too") {
+	cellulose::World<> world;
+	put(world, 0, 0, 0, 1);
+
+	const auto texture_of = [](const cellulose::HotCellAttribute &, cellulose::i32) -> cellulose::TextureID {
+		return 42u;
+	};
+	const auto mesh = cellulose::mesh_chunk_lod(world, { 0, 0, 0 }, 1, world_solid(), texture_of);
+	CHECK(mesh.vertices.size() == 24);
+	for (const auto &vertex : mesh.vertices)
+		CHECK(vertex.texture_id == 42);
+}

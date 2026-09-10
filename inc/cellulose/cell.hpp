@@ -248,6 +248,14 @@ concept HotAttribute =
 	{ p_attribute.block_id }->std::convertible_to<BlockID>;
 };
 
+/// @brief Mesher customization point: the texture id for face `p_face`
+/// (`0..5` = `+X -X +Y -Y +Z -Z`). The default maps every face to `block_id`;
+/// overload it for a custom hot type that stores its own texture, or pass an
+/// explicit resolver (e.g. a `BlockRegistry`) to `mesh_chunk`.
+constexpr auto face_texture(const HotCellAttribute &p_attribute, i32) -> TextureID {
+	return static_cast<TextureID>(p_attribute.block_id);
+}
+
 /// @brief Mesher customization point: the 2-bit brightness of face `p_face`
 /// (`0..5` = `+X -X +Y -Y +Z -Z`). Overload this for a custom hot type to get lit
 /// geometry; without an overload the mesher flat-shades.

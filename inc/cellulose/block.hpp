@@ -2,6 +2,7 @@
 #define CEL_BLOCK_HPP
 
 #include <ankerl/unordered_dense.h>
+#include <array>
 #include <optional>
 #include <vector>
 
@@ -11,6 +12,36 @@
 namespace cellulose {
 
 using BlockID = u16;
+
+/// @brief A texture identifier, meaningful only to the consumer's renderer. In
+/// the raylib array-texture bridge it is the `sampler2DArray` layer index. `0` is
+/// the conventional "unset / default" value.
+using TextureID = u32;
+
+/// @brief The texture id for each of a block's six faces, in the library's
+/// canonical face order: `0` +X (right), `1` -X (left), `2` +Y (top),
+/// `3` -Y (bottom), `4` +Z (back), `5` -Z (front) — the same order as
+/// `face_brightness` and every spatial query.
+struct FaceTextures final {
+	std::array<TextureID, 6> faces{};
+
+	friend auto operator==(const FaceTextures &, const FaceTextures &) -> bool = default;
+
+	/// @brief The same texture on all six faces.
+	static constexpr auto uniform(TextureID p_texture) -> FaceTextures {
+		return FaceTextures{ { p_texture, p_texture, p_texture, p_texture, p_texture, p_texture } };
+	}
+
+	/// @brief A Minecraft-style column: distinct top and bottom, `p_side` on the
+	/// four horizontal faces (grass, logs, sandstone, …).
+	static constexpr auto column(TextureID p_top, TextureID p_side, TextureID p_bottom) -> FaceTextures {
+		return FaceTextures{ { p_side, p_side, p_top, p_bottom, p_side, p_side } };
+	}
+
+	constexpr auto operator[](i32 p_face) const -> TextureID {
+		return faces[static_cast<size>(p_face)];
+	}
+};
 
 namespace impl {
 
@@ -27,6 +58,7 @@ public:
 	friend class BlockBuilder<>;
 
 	std::string name; //!< Name of the block.
+	FaceTextures textures{}; //!< Per-face texture ids for the renderer (all `0` unless set).
 };
 
 /// @brief Registry of blocks.
@@ -69,6 +101,23 @@ public:
 			return std::nullopt;
 		return m_name_id_map.at(p_name);
 	}
+
+	/// @brief The texture id assigned to face `p_face` (`0..5`, canonical order)
+	/// of block `p_block_id`. `0` when the id is out of range or the face was
+	/// never assigned.
+	auto face_texture(BlockID p_block_id, i32 p_face) const -> TextureID {
+		if (p_block_id >= m_store.size())
+			return 0;
+		return m_store[p_block_id].textures[p_face];
+	}
+
+	/// @brief The registry is itself a mesher texture resolver: pass it as the
+	/// `texture_of` argument to `mesh_chunk` and it maps `(hot attribute, face)`
+	/// to a texture id via the attribute's `block_id`.
+	template <typename HotType>
+	auto operator()(const HotType &p_attribute, i32 p_face) const -> TextureID {
+		return face_texture(static_cast<BlockID>(p_attribute.block_id), p_face);
+	}
 };
 
 /// @brief Builder to build blocks.
@@ -76,10 +125,30 @@ template <typename>
 class BlockBuilder final {
 public:
 	std::string name;
+	FaceTextures textures{};
 
 private:
 public:
 	explicit BlockBuilder(std::string p_name) : name(std::move(p_name)) {}
+
+	/// @brief Assign every face's texture id explicitly.
+	auto texture(FaceTextures p_textures) -> BlockBuilder & {
+		textures = p_textures;
+		return *this;
+	}
+
+	/// @brief Assign the same texture id to all six faces.
+	auto texture_all(TextureID p_texture) -> BlockBuilder & {
+		textures = FaceTextures::uniform(p_texture);
+		return *this;
+	}
+
+	/// @brief Assign a Minecraft-style column (distinct top / bottom, `p_side`
+	/// around).
+	auto texture_column(TextureID p_top, TextureID p_side, TextureID p_bottom) -> BlockBuilder & {
+		textures = FaceTextures::column(p_top, p_side, p_bottom);
+		return *this;
+	}
 
 	auto build() -> Block<> {
 		if (name.length() == 0)
@@ -87,7 +156,8 @@ public:
 					"`BlockBuilder`'s name must not be empty when building.");
 
 		return Block<>{
-			.name = std::move(name)
+			.name = std::move(name),
+			.textures = textures
 		};
 	}
 };

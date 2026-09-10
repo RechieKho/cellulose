@@ -10,7 +10,9 @@
 #include "vector.hpp"
 #include "world.hpp"
 #include <array>
+#include <concepts>
 #include <optional>
+#include <type_traits>
 #include <vector>
 
 namespace cellulose {
@@ -24,6 +26,7 @@ struct MeshVertex final {
 	f32 v; //!< tile-space texture coordinate, `[0, quad_height]`
 	f32 brightness; //!< `[0, 1]`, from the cell's 2-bit face brightness
 	u32 block_id;
+	TextureID texture_id; //!< render key — array layer / atlas tile; defaults to `block_id`
 
 	friend auto operator==(const MeshVertex &, const MeshVertex &) -> bool = default;
 };
@@ -43,6 +46,7 @@ struct MeshSample final {
 	std::array<bool, 6> visible{};
 	u16 block_id = 0;
 	std::array<u8, 6> brightness{};
+	std::array<TextureID, 6> texture{}; //!< per-face render key; `0` ⇒ fall back to `block_id`
 };
 
 namespace impl {
@@ -50,7 +54,7 @@ namespace impl {
 inline auto emit_quad(
 		ChunkMesh &p_mesh, i32 p_axis, i32 p_axis_u, i32 p_axis_v, i32 p_sign,
 		i32 p_slice, i32 p_u, i32 p_v, i32 p_width, i32 p_height,
-		f32 p_scale, u32 p_block_id, f32 p_brightness) -> void {
+		f32 p_scale, u32 p_block_id, TextureID p_texture_id, f32 p_brightness) -> void {
 	const f32 plane = static_cast<f32>(p_sign > 0 ? p_slice + 1 : p_slice) * p_scale;
 
 	Vec3 normal{ 0.0f, 0.0f, 0.0f };
@@ -74,7 +78,7 @@ inline auto emit_quad(
 		p_mesh.vertices.push_back(MeshVertex{
 				position, normal,
 				static_cast<f32>(corner[0]), static_cast<f32>(corner[1]),
-				p_brightness, p_block_id });
+				p_brightness, p_block_id, p_texture_id });
 	}
 
 	const std::array<u32, 6> winding = p_sign > 0
@@ -88,9 +92,11 @@ inline auto emit_quad(
 
 /// @brief Greedy-mesh a `p_size^3` grid of `MeshSample` (indexed
 /// `(x * p_size + y) * p_size + z`). For each face direction and slice it builds a
-/// `(block_id << 8 | brightness) + 1` key mask over the cells whose face is
-/// `visible`, merges maximal rectangles, and emits CCW-wound quads scaled by
+/// `((texture << 2) | brightness) + 1` key mask over the cells whose face is
+/// `visible` (texture = the face's `texture` entry, or `block_id` when that is
+/// `0`), merges maximal rectangles, and emits CCW-wound quads scaled by
 /// `p_block_scale` (so a downsampled grid still spans `[0, p_size * p_block_scale]`).
+/// The emitted `block_id` is that of the merged run's origin cell.
 inline auto greedy_mesh(const std::vector<MeshSample> &p_samples, i32 p_size, f32 p_block_scale) -> ChunkMesh {
 	ChunkMesh mesh;
 
@@ -104,7 +110,11 @@ inline auto greedy_mesh(const std::vector<MeshSample> &p_samples, i32 p_size, f3
 		const i32 axis_u = (axis + 1) % 3;
 		const i32 axis_v = (axis + 2) % 3;
 
-		std::vector<u32> keys(static_cast<size>(p_size) * p_size, 0);
+		// Merge key folds in the face's resolved texture id (array layer) and its
+		// brightness — never the block id, so unlike blocks that share a face
+		// texture still merge. The block id is carried separately for the vertex.
+		std::vector<u64> keys(static_cast<size>(p_size) * p_size, 0);
+		std::vector<u32> block_at(static_cast<size>(p_size) * p_size, 0);
 
 		for (i32 slice = 0; slice < p_size; ++slice) {
 			for (i32 vv = 0; vv < p_size; ++vv)
@@ -115,17 +125,20 @@ inline auto greedy_mesh(const std::vector<MeshSample> &p_samples, i32 p_size, f3
 					cell[static_cast<size>(axis_v)] = vv;
 
 					const MeshSample &sample = at(cell[0], cell[1], cell[2]);
-					const u32 key = sample.visible[static_cast<size>(face)]
-							? ((static_cast<u32>(sample.block_id) << 8) |
-									  sample.brightness[static_cast<size>(face)]) +
-									1
+					const size fi = static_cast<size>(face);
+					const TextureID texture = sample.texture[fi] != 0
+							? sample.texture[fi]
+							: static_cast<TextureID>(sample.block_id);
+					const u64 key = sample.visible[fi]
+							? ((static_cast<u64>(texture) << 2) | sample.brightness[fi]) + 1
 							: 0;
 					keys[static_cast<size>(vv) * p_size + uu] = key;
+					block_at[static_cast<size>(vv) * p_size + uu] = sample.block_id;
 				}
 
 			for (i32 vv = 0; vv < p_size; ++vv) {
 				for (i32 uu = 0; uu < p_size;) {
-					const u32 key = keys[static_cast<size>(vv) * p_size + uu];
+					const u64 key = keys[static_cast<size>(vv) * p_size + uu];
 					if (key == 0) {
 						++uu;
 						continue;
@@ -150,7 +163,9 @@ inline auto greedy_mesh(const std::vector<MeshSample> &p_samples, i32 p_size, f3
 
 					impl::emit_quad(
 							mesh, axis, axis_u, axis_v, sign, slice, uu, vv, width, height,
-							p_block_scale, (key - 1) >> 8, static_cast<f32>((key - 1) & 0xffu) / 3.0f);
+							p_block_scale, block_at[static_cast<size>(vv) * p_size + uu],
+							static_cast<TextureID>((key - 1) >> 2),
+							static_cast<f32>((key - 1) & 0x3u) / 3.0f);
 
 					for (i32 y = 0; y < height; ++y)
 						for (i32 x = 0; x < width; ++x)
@@ -177,13 +192,28 @@ auto sample_face_brightness(const HotType &p_attribute, i32 p_face) -> u8 {
 		return 3;
 }
 
+/// @brief Face `p_face` texture id of a hot attribute. Uses the explicit
+/// resolver `p_texture_of` when the caller supplied one; otherwise the
+/// `face_texture` customization point; otherwise the attribute's `block_id`.
+template <typename HotType, typename TextureOfPtr>
+auto sample_face_texture(const HotType &p_attribute, i32 p_face, TextureOfPtr p_texture_of) -> TextureID {
+	if constexpr (std::is_same_v<TextureOfPtr, std::nullptr_t>) {
+		if constexpr (requires { face_texture(p_attribute, p_face); })
+			return static_cast<TextureID>(face_texture(p_attribute, p_face));
+		else
+			return static_cast<TextureID>(p_attribute.block_id);
+	} else {
+		return static_cast<TextureID>((*p_texture_of)(p_attribute, p_face));
+	}
+}
+
 /// @brief Build the `n^3` `MeshSample` grid for `p_chunk` at LOD `p_level`.
 /// A macro-cell has geometry if `p_has_geometry` holds for any of its
 /// `(1 << p_level)^3` cells (attributes from the first such cell). Face `f` is
 /// visible when the cell has geometry and `p_is_hidden(cell, neighbour)` is false
 /// (an absent-chunk neighbour is a default-constructed hot attribute).
-template <typename WorldType, typename HasGeometry, typename IsHidden>
-auto sample_chunk(WorldType &p_world, const ChunkPosition &p_chunk, i32 p_level, HasGeometry &p_has_geometry, IsHidden &p_is_hidden) -> std::vector<MeshSample> {
+template <typename WorldType, typename HasGeometry, typename IsHidden, typename TextureOfPtr>
+auto sample_chunk(WorldType &p_world, const ChunkPosition &p_chunk, i32 p_level, HasGeometry &p_has_geometry, IsHidden &p_is_hidden, TextureOfPtr p_texture_of) -> std::vector<MeshSample> {
 	using HotType = typename WorldType::HotAttributeType;
 
 	const i32 block = 1 << p_level;
@@ -241,6 +271,7 @@ auto sample_chunk(WorldType &p_world, const ChunkPosition &p_chunk, i32 p_level,
 				out.block_id = self->block_id;
 				for (i32 face = 0; face < 6; ++face) {
 					out.brightness[static_cast<size>(face)] = sample_face_brightness(*self, face);
+					out.texture[static_cast<size>(face)] = sample_face_texture(*self, face, p_texture_of);
 					const auto &neighbour = sampled(
 							x + face_offset[static_cast<size>(face)][0],
 							y + face_offset[static_cast<size>(face)][1],
@@ -253,19 +284,44 @@ auto sample_chunk(WorldType &p_world, const ChunkPosition &p_chunk, i32 p_level,
 	return samples;
 }
 
+/// @brief Recognises a mesher texture resolver — `p_fn(attr, face) -> TextureID`
+/// — so it can be told apart from an `is_hidden(near, far)` rule at the same arity.
+template <typename Fn, typename HotType>
+concept FaceTextureResolver = requires(Fn & p_fn, const HotType &p_attribute) {
+	{ p_fn(p_attribute, i32{ 0 }) }->std::same_as<TextureID>;
+};
+
+/// @brief Shared body for the four public entry points.
+template <typename WorldType, typename HasGeometry, typename IsHidden, typename TextureOfPtr>
+auto mesh_chunk_impl(WorldType &p_world, const ChunkPosition &p_chunk, i32 p_level, HasGeometry &p_has_geometry, IsHidden &p_is_hidden, TextureOfPtr p_texture_of) -> ChunkMesh {
+	return greedy_mesh(
+			impl::sample_chunk(p_world, p_chunk, p_level, p_has_geometry, p_is_hidden, p_texture_of),
+			static_cast<i32>(chunk_edge_length) >> p_level,
+			static_cast<f32>(1 << p_level));
+}
+
 } //namespace impl
 
 /// @brief Greedy-mesh chunk `p_chunk`. `p_is_solid(HotAttribute)` decides both
 /// which cells emit geometry and which faces are hidden (a face is culled iff its
 /// neighbour is solid). Absent neighbour chunks are empty. Vertices are
-/// chunk-local, in `[0, chunk_edge_length]`.
+/// chunk-local, in `[0, chunk_edge_length]`. Each vertex's `texture_id` comes
+/// from the `face_texture` customization point, or the cell's `block_id`.
 template <typename WorldType, typename Predicate>
 auto mesh_chunk(WorldType &p_world, const ChunkPosition &p_chunk, Predicate &&p_is_solid) -> ChunkMesh {
 	auto has_geometry = [&](const auto &p_attribute) { return p_is_solid(p_attribute); };
 	auto is_hidden = [&](const auto &, const auto &p_far) { return p_is_solid(p_far); };
-	return greedy_mesh(
-			impl::sample_chunk(p_world, p_chunk, 0, has_geometry, is_hidden),
-			static_cast<i32>(chunk_edge_length), 1.0f);
+	return impl::mesh_chunk_impl(p_world, p_chunk, 0, has_geometry, is_hidden, nullptr);
+}
+
+/// @brief `mesh_chunk` with an explicit per-face texture resolver
+/// `p_texture_of(attr, face) -> TextureID` (`BlockRegistry` is one). The resolved
+/// id also joins the greedy merge key, so faces only merge within one texture.
+template <typename WorldType, typename Predicate, typename TextureOf>
+requires impl::FaceTextureResolver<TextureOf, typename WorldType::HotAttributeType> auto mesh_chunk(WorldType &p_world, const ChunkPosition &p_chunk, Predicate &&p_is_solid, TextureOf &&p_texture_of) -> ChunkMesh {
+	auto has_geometry = [&](const auto &p_attribute) { return p_is_solid(p_attribute); };
+	auto is_hidden = [&](const auto &, const auto &p_far) { return p_is_solid(p_far); };
+	return impl::mesh_chunk_impl(p_world, p_chunk, 0, has_geometry, is_hidden, &p_texture_of);
 }
 
 /// @brief `mesh_chunk` with the geometry and face-culling rules split — for
@@ -273,10 +329,14 @@ auto mesh_chunk(WorldType &p_world, const ChunkPosition &p_chunk, Predicate &&p_
 /// faces; `p_is_hidden(near, far)` decides whether `near`'s face toward `far` is
 /// culled (e.g. water-vs-water hidden, water-vs-glass not).
 template <typename WorldType, typename HasGeometry, typename IsHidden>
-auto mesh_chunk(WorldType &p_world, const ChunkPosition &p_chunk, HasGeometry &&p_has_geometry, IsHidden &&p_is_hidden) -> ChunkMesh {
-	return greedy_mesh(
-			impl::sample_chunk(p_world, p_chunk, 0, p_has_geometry, p_is_hidden),
-			static_cast<i32>(chunk_edge_length), 1.0f);
+requires(!impl::FaceTextureResolver<IsHidden, typename WorldType::HotAttributeType>) auto mesh_chunk(WorldType &p_world, const ChunkPosition &p_chunk, HasGeometry &&p_has_geometry, IsHidden &&p_is_hidden) -> ChunkMesh {
+	return impl::mesh_chunk_impl(p_world, p_chunk, 0, p_has_geometry, p_is_hidden, nullptr);
+}
+
+/// @brief `mesh_chunk` with both split rules and an explicit texture resolver.
+template <typename WorldType, typename HasGeometry, typename IsHidden, typename TextureOf>
+auto mesh_chunk(WorldType &p_world, const ChunkPosition &p_chunk, HasGeometry &&p_has_geometry, IsHidden &&p_is_hidden, TextureOf &&p_texture_of) -> ChunkMesh {
+	return impl::mesh_chunk_impl(p_world, p_chunk, 0, p_has_geometry, p_is_hidden, &p_texture_of);
 }
 
 /// @brief As `mesh_chunk`, merging each `(1 << p_level)^3` block into one
@@ -286,19 +346,27 @@ template <typename WorldType, typename Predicate>
 auto mesh_chunk_lod(WorldType &p_world, const ChunkPosition &p_chunk, i32 p_level, Predicate &&p_is_solid) -> ChunkMesh {
 	auto has_geometry = [&](const auto &p_attribute) { return p_is_solid(p_attribute); };
 	auto is_hidden = [&](const auto &, const auto &p_far) { return p_is_solid(p_far); };
-	return greedy_mesh(
-			impl::sample_chunk(p_world, p_chunk, p_level, has_geometry, is_hidden),
-			static_cast<i32>(chunk_edge_length) >> p_level,
-			static_cast<f32>(1 << p_level));
+	return impl::mesh_chunk_impl(p_world, p_chunk, p_level, has_geometry, is_hidden, nullptr);
+}
+
+/// @brief `mesh_chunk_lod` with an explicit per-face texture resolver.
+template <typename WorldType, typename Predicate, typename TextureOf>
+requires impl::FaceTextureResolver<TextureOf, typename WorldType::HotAttributeType> auto mesh_chunk_lod(WorldType &p_world, const ChunkPosition &p_chunk, i32 p_level, Predicate &&p_is_solid, TextureOf &&p_texture_of) -> ChunkMesh {
+	auto has_geometry = [&](const auto &p_attribute) { return p_is_solid(p_attribute); };
+	auto is_hidden = [&](const auto &, const auto &p_far) { return p_is_solid(p_far); };
+	return impl::mesh_chunk_impl(p_world, p_chunk, p_level, has_geometry, is_hidden, &p_texture_of);
 }
 
 /// @brief `mesh_chunk_lod` with split geometry / face-culling rules.
 template <typename WorldType, typename HasGeometry, typename IsHidden>
-auto mesh_chunk_lod(WorldType &p_world, const ChunkPosition &p_chunk, i32 p_level, HasGeometry &&p_has_geometry, IsHidden &&p_is_hidden) -> ChunkMesh {
-	return greedy_mesh(
-			impl::sample_chunk(p_world, p_chunk, p_level, p_has_geometry, p_is_hidden),
-			static_cast<i32>(chunk_edge_length) >> p_level,
-			static_cast<f32>(1 << p_level));
+requires(!impl::FaceTextureResolver<IsHidden, typename WorldType::HotAttributeType>) auto mesh_chunk_lod(WorldType &p_world, const ChunkPosition &p_chunk, i32 p_level, HasGeometry &&p_has_geometry, IsHidden &&p_is_hidden) -> ChunkMesh {
+	return impl::mesh_chunk_impl(p_world, p_chunk, p_level, p_has_geometry, p_is_hidden, nullptr);
+}
+
+/// @brief `mesh_chunk_lod` with both split rules and an explicit texture resolver.
+template <typename WorldType, typename HasGeometry, typename IsHidden, typename TextureOf>
+auto mesh_chunk_lod(WorldType &p_world, const ChunkPosition &p_chunk, i32 p_level, HasGeometry &&p_has_geometry, IsHidden &&p_is_hidden, TextureOf &&p_texture_of) -> ChunkMesh {
+	return impl::mesh_chunk_impl(p_world, p_chunk, p_level, p_has_geometry, p_is_hidden, &p_texture_of);
 }
 
 } //namespace cellulose
