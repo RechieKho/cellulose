@@ -50,16 +50,20 @@ TEST_CASE("pack of nothing yields a 1x1 sheet") {
 	CHECK(packed.height == 1);
 }
 
-TEST_CASE("strip is a single column, tile_px wide and count*tile_px tall") {
+TEST_CASE("strip is a single column with one row per id, sized to max(id) + 1") {
 	const std::array<TextureID, 3> ids{ 1, 2, 3 };
 	const PackedAtlas packed = strip(ids, 16);
 	CHECK(packed.width == 16);
-	CHECK(packed.height == 48);
+	CHECK(packed.height == 64); // rows 0..3, id 0 unused
 
-	// grid(1, 3): row n spans v in [n/3, (n+1)/3], full width
+	// row id spans v in [id/4, (id+1)/4], full width
 	const UvRect r1 = packed.atlas.rect_of(1);
 	CHECK(r1.u0 == doctest::Approx(0.0f));
 	CHECK(r1.u1 == doctest::Approx(1.0f));
-	CHECK(r1.v0 == doctest::Approx(1.0f / 3.0f));
-	CHECK(r1.v1 == doctest::Approx(2.0f / 3.0f));
+	CHECK(r1.v0 == doctest::Approx(0.25f));
+	CHECK(r1.v1 == doctest::Approx(0.5f));
+
+	const UvRect r3 = packed.atlas.rect_of(3);
+	CHECK(r3.v0 == doctest::Approx(0.75f));
+	CHECK(r3.v1 == doctest::Approx(1.0f));
 }

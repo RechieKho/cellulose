@@ -10,17 +10,17 @@ and the consumer resolves colour/texture itself (the demo `switch`es on
 
 | # | Question | Decision |
 |---|----------|----------|
-| 1 | Atlas sampling strategy | **C2 — texture array** (`GL_TEXTURE_2D_ARRAY`, one layer per texture id). No `fract`, no bleed, `REPEAT` per layer keeps greedy merging free. All tiles are one size. |
+| 1 | Atlas sampling strategy | **C1 — one CPU-built 2-D atlas + a tiny tiling shader.** ~~C2 texture array~~ was pivoted away from: raylib exposes no `GL_TEXTURE_2D_ARRAY` API, so it forced ~40 lines of raw-GL / `wglGetProcAddress` glue into the bridge that would multiply per new target platform. C1 is stock raylib — one `Texture2D`, one draw call, greedy merging preserved; the shader does `origin + fract(tileUV) * tileSize`. |
 | 2 | Where texture assignments live | **Extend `Block` / `BlockRegistry`.** `Block` gains `FaceTextures`; `BlockBuilder` gains `.texture*()`; `BlockRegistry` exposes a `face_texture(block, face)` resolver the mesher accepts. |
-| 3 | Rect packer | **Include now** — `atlas_builder.hpp`, renderer-neutral, size-only. Feeds the *array-strip* image layout for C2 (and a 2-D sheet for non-array consumers). |
+| 3 | Rect packer | **Include now** — `atlas_builder.hpp`, renderer-neutral, size-only. Produces the `TextureAtlas` the bridge samples and lays out the sheet image the consumer blits into. |
 | 4 | `MeshVertex` | Add a `TextureID texture_id` field (40 → 44 bytes). |
 | 5 | LOD meshing | Thread `texture_id` through `mesh_chunk_lod` too. |
 
-Because C2 addresses tiles by **layer index**, `texture_id` *is* the array layer
-— there is no per-tile `UvRect` on the hot path. `TextureAtlas` / the packer
-still produce rects, but only for (a) laying out the vertical strip image the
-array is uploaded from and (b) consumers targeting a plain 2-D sheet on another
-renderer. The mesher and the raylib array path never look at a `UvRect`.
+`texture_id` is renderer-agnostic: the mesher only folds it into the merge key
+and copies it onto each vertex. The **bridge** turns it into an atlas rect via
+`TextureAtlas::rect_of(texture_id)` — so a merged N×M quad carries tile-space
+UVs `[0,N]×[0,M]` plus its tile's atlas origin, and the shader tiles within the
+tile. A uniform-grid atlas means `tileSize` is one shader uniform, not per-vertex.
 
 ## Principles (unchanged from the rest of the library)
 
@@ -77,8 +77,9 @@ block by id from `HotCellAttribute`" (its own doc comment) — this is exactly t
 
 ## A2. Atlas geometry — `inc/cellulose/texture.hpp` (renderer-neutral, umbrella)
 
-Only needed to lay out the strip image the array is uploaded from, and for
-non-array consumers. The mesher never touches these.
+Maps a `TextureID` to its rect in the sheet. The bridge samples it; the mesher
+never touches it. (`layers(count)` mode is a degenerate whole-sheet map, kept for
+symmetry / non-atlas consumers.)
 
 ```cpp
 namespace cellulose {
@@ -142,49 +143,56 @@ public:
 
 ---
 
-## C. Sampling — texture array (decision 1 = C2)
+## C. Sampling — one 2-D atlas + tiling shader (decision 1 = C1)
 
 Greedy meshing merges an `N×M` run into one quad with `u ∈ [0,N], v ∈ [0,M]`.
-A `GL_TEXTURE_2D_ARRAY` sampled `texture(sampler2DArray, vec3(uv, layer))` with
-`REPEAT` wrap tiles that quad correctly with **no `fract`, no bleed** — each
-layer is its own image, so a merged run of one layer just repeats. This is why
-the merge key folds in `texture_id` (§B.5): a quad is always a single layer.
+Plain `GL_REPEAT` on an atlas wraps the *whole sheet* and bleeds between tiles,
+so the shader tiles within the tile instead:
 
-The layer index reaches the shader as a per-vertex value. raylib's `Mesh` has no
-spare integer stream, so the bridge writes it into `texcoords2.x` (a `Vector2`
-slot otherwise used for lightmaps) and the shader reads
-`int layer = int(fragTexCoord2.x + 0.5);`.
+```glsl
+vec2 uv = tileOrigin + fract(vTileUV) * uTileSize;
+finalColor = texture(atlas, uv) * vec4(vec3(vBrightness), 1.0);
+```
 
-All tiles are one size (`tile_px`, e.g. 16). Non-uniform textures are the
-consumer's problem to pre-scale — the same constraint every array-texture engine
-has.
+* `vTileUV` — the mesh's existing tile-space `texcoords` (`[0,N]×[0,M]`).
+* `tileOrigin` — `TextureAtlas::rect_of(texture_id).min`, baked per-vertex into
+  `texcoords2` by the bridge (raylib's spare `Vector2` stream).
+* `uTileSize` — one uniform `vec2 (1/columns, 1/rows)` (uniform-grid atlas).
+* Wrap `CLAMP`, filter `NEAREST` — the voxel look, and `NEAREST` sidesteps the
+  mip / linear-filter seam that `fract` would otherwise introduce.
+
+Because `texture_id` is in the merge key (§B.5) a merged quad is always one
+tile, so one `tileOrigin` per quad is exact. A consumer who wants linear
+filtering / mipmaps adds a half-texel inset to `uTileSize` and `textureGrad` —
+documented, not the default.
 
 ---
 
 ## D. `raylib.hpp` bridge additions
 
 ```cpp
-/// ChunkMesh -> Mesh, layer index baked into texcoords2.x. Pair with the shader.
-auto to_raylib_mesh_array(const ChunkMesh &) -> Mesh;
+/// ChunkMesh -> Mesh. `p_atlas.rect_of(vertex.texture_id).min` is baked into
+/// texcoords2; texcoords keep the tile-space [0,N] UVs; brightness -> vertex colour.
+auto to_raylib_mesh(const ChunkMesh &, const TextureAtlas &) -> Mesh;
 
-/// GLSL 330 vertex+fragment sources for sampler2DArray + per-vertex layer + brightness.
-inline constexpr const char *array_vs;
-inline constexpr const char *array_fs;
+/// GLSL 330 vertex + fragment sources for the tiling sampler above.
+inline constexpr const char *atlas_tiling_vs;
+inline constexpr const char *atlas_tiling_fs;
 
-/// Upload `count` layers of `tile_px` from one vertical strip Image
-/// (height == count * tile_px). Returns a raw GL array-texture id wrapped in Texture2D.
-auto load_texture_array(Image strip, u32 tile_px, u32 count) -> Texture2D;
+/// Compile that shader and set `uTileSize` from the atlas grid. `mvp` /
+/// `matModel` are auto-wired by raylib.
+auto load_atlas_shader(const TextureAtlas &) -> Shader;
 
-/// Texture-array + compiled Shader + Material wired to sample it.
-auto load_array_material(Texture2D array_texture) -> Material;
+/// LoadMaterialDefault + the shader + the atlas Texture2D as MAP_DIFFUSE.
+auto load_atlas_material(Shader, Texture2D atlas) -> Material;
 ```
 
-Implemented with `rlgl` (`rlLoadTexture` won't do array textures — use
-`glTexImage3D` via `rlLoadTextureDepth`-style raw calls, guarded to GL ≥ 3.3).
-The consumer still calls `LoadImage` on their own PNG strip — image IO stays out.
+All stock raylib — `LoadShaderFromMemory`, `LoadTextureFromImage`, a normal
+`Material` / `DrawMesh`. No `rlgl`, no raw GL, nothing platform-specific. The
+consumer builds the atlas `Image` (see §E) and calls `LoadTextureFromImage`.
 
-The existing flat-colour path (`to_raylib_mesh` + a `block_colour` fn) is
-untouched for consumers not using textures.
+The existing flat-colour path (`to_raylib_mesh(mesh, color_fn)`) is untouched
+for consumers not using textures.
 
 ---
 
@@ -192,17 +200,14 @@ untouched for consumers not using textures.
 
 Renderer-neutral, no image decode. `pack(std::span<const TileSize>) -> PackedAtlas`
 where `TileSize{ TextureID id; u32 w, h; }` and `PackedAtlas` holds a
-`TextureAtlas` (rect mode) + total sheet `w/h`. Shelf/skyline packer (~90 LOC).
+`TextureAtlas` + sheet `w/h`. Shelf packer (~90 LOC). The consumer allocates a
+`w × h` image, blits each tile's pixels into `rect_of(id)`, uploads it once.
 
-Two uses:
-- **Array strip layout**: with all tiles `tile_px` square, `pack` degenerates to
-  a 1-column strip — `count * tile_px` tall — which `load_texture_array` consumes
-  directly. A `strip(ids, tile_px)` convenience wraps this.
-- **2-D sheet** for consumers on another renderer / a 2-D atlas path — the
-  general non-uniform case.
+`strip(ids, tile_px)` is the uniform-grid convenience — a `1 × N` `TextureAtlas`
+(`Grid` mode) plus the `tile_px × (N·tile_px)` sheet size — the layout the demo
+builds procedurally.
 
-The consumer blits pixels into the returned rects; the library never sees a
-pixel.
+The library never sees a pixel.
 
 ---
 
@@ -210,9 +215,10 @@ pixel.
 
 Blocks get textures through `BlockBuilder`: grass =
 `.texture_column(grass_top, grass_side, dirt)`, dirt / stone = `.texture_all(...)`.
-The demo builds a tiny procedural strip `Image` in code (no checked-in asset),
-`load_texture_array` + `load_array_material`, meshes with the `BlockRegistry`
-resolver, `to_raylib_mesh_array`. README example gains a few lines showing
+The demo builds a tiny procedural atlas `Image` in code (no checked-in asset)
+from `strip(ids, 16)`, `LoadTextureFromImage`, `load_atlas_shader` +
+`load_atlas_material`, meshes with the `BlockRegistry` resolver,
+`to_raylib_mesh(mesh, atlas)`. README example gains a few lines showing
 `BlockBuilder::texture_column` + the textured `mesh_chunk` overload.
 
 ---
@@ -222,8 +228,8 @@ resolver, `to_raylib_mesh_array`. README example gains a few lines showing
 - `FaceTextures::uniform` / `column` map the six faces correctly.
 - `BlockBuilder::texture*` → `BlockRegistry::face_texture` returns set values,
   `0` for unset / out-of-range ids; `BlockRegistry` works as a mesher resolver.
-- `TextureAtlas::grid` / `layers` rect math (tile 5 of a 4×4 → row 1 col 1; UV
-  corners correct; `layers` → full-`[0,1]²` rect, `layer_of(id) == id`).
+- `TextureAtlas::grid` rect math (tile 5 of a 4×4 → row 1 col 1; corners
+  correct); explicit `set_rect` overrides, unset id reads whole-sheet.
 - `atlas_builder::pack` — no overlaps, everything inside the sheet;
   `strip(ids, px)` → 1-column, `count*px` tall.
 - Mesher: a `column` grass block emits distinct `texture_id` on top / side /
@@ -236,14 +242,14 @@ resolver, `to_raylib_mesh_array`. README example gains a few lines showing
 
 ## Phasing
 
-| Step | Content |
-|---|---|
-| **TX1** | `block.hpp`: `TextureID`, `FaceTextures`, `Block::textures`, `BlockBuilder::texture*()`, `BlockRegistry::face_texture` + resolver `operator()`. `texture.hpp`: `UvRect`, `TextureAtlas` (`layers` / `grid` / explicit). Umbrella. Tests. Commit. |
-| **TX2** | `atlas_builder.hpp`: `TileSize`, `PackedAtlas`, `pack`, `strip`. Umbrella. Tests. Commit. |
-| **TX3** | mesher: `MeshVertex::texture_id`, `MeshSample::texture`, `face_texture` CPO + `impl::sample_face_texture`, resolver overloads (incl. LOD), `u64` merge key; tests; commit. |
-| **TX4** | `raylib.hpp`: `to_raylib_mesh_array`, `array_vs` / `array_fs`, `load_texture_array`, `load_array_material`; commit. |
-| **TX5** | demo: procedural strip + per-face grass via `BlockBuilder`; README note; commit. |
-| **TX6** | docs: `ARCHITECTURE_SPEC.md` §4 + decision table, close the `REMAINING_TASKS` texture-atlas item, `STATE.md` gotchas (canonical face order, `texcoords2.x` layer channel, `rlgl` array-texture path, GL 3.3 guard); commit. |
+| Step | Content | Status |
+|---|---|---|
+| **TX1** | `block.hpp`: `TextureID`, `FaceTextures`, `Block::textures`, `BlockBuilder::texture*()`, `BlockRegistry::face_texture` + resolver. `texture.hpp`: `UvRect`, `TextureAtlas`. Umbrella. Tests. | ✅ `f178b59` |
+| **TX2** | `atlas_builder.hpp`: `TileSize`, `PackedAtlas`, `pack`, `strip`. Umbrella. Tests. | ✅ `f178b59` |
+| **TX3** | mesher: `MeshVertex::texture_id`, `MeshSample::texture`, `face_texture` CPO + `impl::sample_face_texture`, resolver overloads (incl. LOD), merge key folds in texture. Tests. | ✅ `f178b59` |
+| **TX4** | `raylib.hpp`: `to_raylib_mesh(mesh, atlas)`, `atlas_tiling_vs` / `_fs`, `load_atlas_shader`, `load_atlas_material`. | |
+| **TX5** | demo: procedural atlas + per-face grass via `BlockBuilder`; README note. | |
+| **TX6** | docs: `ARCHITECTURE_SPEC.md` §4 + decision table, close the `REMAINING_TASKS` texture-atlas item, `STATE.md` gotchas (canonical face order, `texcoords2` = tile origin, `fract` tiling shader, `NEAREST`/`CLAMP`). | |
 
 ---
 
@@ -254,5 +260,5 @@ resolver, `to_raylib_mesh_array`. README example gains a few lines showing
 3. `Chunk<>` and every existing `mesh_chunk` / `mesh_chunk_lod` call site compile
    and produce identical geometry (fixed-scene byte compare).
 4. `clang-format` clean; demo runs, textured terrain renders, no GL errors.
-5. CI (Linux/macOS/Windows build) green — watch the `rlgl` calls on GL ES / older
-   drivers; guard and fall back to the flat path if array textures are absent.
+5. CI (Linux/macOS/Windows build) green — the bridge is stock raylib, no
+   platform-specific code.

@@ -98,16 +98,19 @@ inline auto pack(std::span<const TileSize> p_tiles) -> PackedAtlas {
 	return packed;
 }
 
-/// @brief Lay `p_ids` out as a single vertical column of `p_tile_px`-square
-/// tiles — the layout the raylib array-texture bridge uploads from (one layer
-/// per row). The returned atlas is in `Grid` mode (`1 x count`), so `rect_of(n)`
-/// is row `n`.
+/// @brief Lay tiles out as a single vertical column of `p_tile_px`-square cells,
+/// row `n` == texture id `n`. The sheet has `max(p_ids) + 1` rows, so ids need
+/// not be contiguous (and id `0` — the "unset" sentinel — is simply an unused
+/// row). The returned atlas is `Grid` mode (`1 x rows`), so `rect_of(id)` is
+/// row `id`. The consumer blits each tile's pixels into `rect_of(id)`.
 inline auto strip(std::span<const TextureID> p_ids, u32 p_tile_px) -> PackedAtlas {
 	PackedAtlas packed;
-	const auto count = static_cast<u32>(p_ids.size());
+	u32 rows = 1;
+	for (const TextureID id : p_ids)
+		rows = std::max(rows, id + 1);
 	packed.width = p_tile_px;
-	packed.height = std::max<u32>(count, 1) * p_tile_px;
-	packed.atlas = TextureAtlas::grid(1, std::max<u32>(count, 1));
+	packed.height = rows * p_tile_px;
+	packed.atlas = TextureAtlas::grid(1, rows);
 	return packed;
 }
 

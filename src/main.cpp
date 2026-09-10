@@ -1,11 +1,15 @@
 // A minimal voxel game on top of `cellulose` — fly around, break blocks with the
 // left mouse button, place them with the right. The whole "engine" is:
 //   * a `cellulose::World` holding the blocks,
+//   * a `cellulose::BlockRegistry` mapping block ids to per-face textures,
 //   * `cellulose::raycast` to find the block under the crosshair,
-//   * `cellulose::mesh_chunk` to (re)build each chunk's render mesh after an edit.
+//   * `cellulose::mesh_chunk` to (re)build each chunk's render mesh after an edit,
+//   * `cellulose::to_raylib_mesh` + the atlas-tiling shader to draw it.
 // Everything else here is raylib windowing / camera / draw calls.
 
 #include <raylib.h>
+#include <raymath.h>
+#include <algorithm>
 #include <array>
 #include <cellulose/cellulose.hpp>
 #include <cellulose/raylib.hpp>
@@ -16,24 +20,45 @@ namespace {
 
 constexpr int chunks = 3; // a `chunks` x `chunks` patch of terrain on the XZ plane
 constexpr int edge = static_cast<int>(cellulose::chunk_edge_length); // 32
+constexpr int tile_px = 16;
+
+// Block ids (index into the registry) and texture ids (row in the atlas strip).
+enum : cellulose::u16 { block_air = 0,
+	block_grass = 1,
+	block_dirt = 2,
+	block_stone = 3 };
+enum : cellulose::TextureID { tex_grass_top = 1,
+	tex_grass_side = 2,
+	tex_dirt = 3,
+	tex_stone = 4 };
 
 // "Solid" for raycasting and meshing: any non-air block id.
 auto is_solid(const cellulose::HotCellAttribute &p_attribute) -> bool {
-	return p_attribute.block_id != 0;
+	return p_attribute.block_id != block_air;
 }
 
-// block id → colour, shaded by the mesher's per-face brightness.
-auto block_colour(const cellulose::MeshVertex &p_vertex) -> Color {
-	const float shade = 0.45f + 0.55f * p_vertex.brightness;
-	const auto scale = [shade](float p_value) { return static_cast<unsigned char>(p_value * shade); };
-	switch (p_vertex.block_id) {
-		case 1:
-			return Color{ scale(96), scale(172), scale(72), 255 }; // grass
-		case 2:
-			return Color{ scale(148), scale(108), scale(74), 255 }; // dirt
-		default:
-			return Color{ scale(128), scale(128), scale(134), 255 }; // stone
-	}
+// A 1x5 vertical strip: row `id` is the 16x16 tile for texture id `id`.
+auto build_atlas_image() -> Image {
+	Image image = GenImageColor(tile_px, 5 * tile_px, BLANK);
+	const auto jitter = [](unsigned char p_channel, int p_delta) {
+		return static_cast<unsigned char>(std::min(255, std::max(0, static_cast<int>(p_channel) + p_delta)));
+	};
+	const auto fill = [&](cellulose::TextureID p_id, Color p_base, int p_cap_rows, Color p_cap) {
+		for (int y = 0; y < tile_px; ++y)
+			for (int x = 0; x < tile_px; ++x) {
+				const int n = (x * 7 + y * 13) % 24 - 12; // cheap per-texel noise
+				Color c = (y < p_cap_rows) ? p_cap : p_base;
+				c.r = jitter(c.r, n);
+				c.g = jitter(c.g, n);
+				c.b = jitter(c.b, n);
+				ImageDrawPixel(&image, x, static_cast<int>(p_id) * tile_px + y, c);
+			}
+	};
+	fill(tex_grass_top, Color{ 96, 172, 72, 255 }, 0, WHITE);
+	fill(tex_grass_side, Color{ 148, 108, 74, 255 }, 4, Color{ 96, 172, 72, 255 });
+	fill(tex_dirt, Color{ 148, 108, 74, 255 }, 0, WHITE);
+	fill(tex_stone, Color{ 128, 128, 134, 255 }, 0, WHITE);
+	return image;
 }
 
 // A gentle sine-wave heightmap so there's terrain to dig into.
@@ -47,7 +72,7 @@ auto generate(cellulose::World<> &p_world) -> void {
 					const int wz = cz * edge + lz;
 					const int height = 8 + static_cast<int>(3.0 * std::sin(wx * 0.15) * std::cos(wz * 0.15));
 					for (int y = 0; y <= height && y < edge; ++y) {
-						const cellulose::u16 id = (y == height) ? 1 : (y + 3 > height ? 2 : 3);
+						const cellulose::u16 id = (y == height) ? block_grass : (y + 3 > height ? block_dirt : block_stone);
 						chunk.hot_attribute(cellulose::LocalPosition{
 													static_cast<cellulose::u8>(lx),
 													static_cast<cellulose::u8>(y),
@@ -70,12 +95,34 @@ auto main() -> int {
 	generate(world);
 	std::cout << "world: " << world.chunk_count() << " chunks generated\n";
 
+	// Block id -> per-face texture ids. `grass` is a Minecraft-style column.
+	const auto registry =
+			cellulose::BlockRegistryBuilder()
+					.add_block_builder(cellulose::BlockBuilder("air"))
+					.add_block_builder(cellulose::BlockBuilder("grass").texture_column(tex_grass_top, tex_grass_side, tex_dirt))
+					.add_block_builder(cellulose::BlockBuilder("dirt").texture_all(tex_dirt))
+					.add_block_builder(cellulose::BlockBuilder("stone").texture_all(tex_stone))
+					.build();
+
 	InitWindow(1280, 720, "cellulose - minimal voxel game");
 	DisableCursor();
 	SetTargetFPS(60);
 
-	// One raylib Model per terrain chunk, rebuilt when marked dirty.
-	std::array<std::array<Model, chunks>, chunks> models{};
+	const std::array<cellulose::TextureID, 4> ids{ tex_grass_top, tex_grass_side, tex_dirt, tex_stone };
+	const cellulose::TextureAtlas atlas = cellulose::strip(ids, tile_px).atlas;
+
+	Image atlas_image = build_atlas_image();
+	const Texture2D atlas_texture = LoadTextureFromImage(atlas_image);
+	UnloadImage(atlas_image);
+	SetTextureFilter(atlas_texture, TEXTURE_FILTER_POINT);
+	SetTextureWrap(atlas_texture, TEXTURE_WRAP_CLAMP);
+
+	const Shader shader = cellulose::load_atlas_shader(atlas);
+	const Material material = cellulose::load_atlas_material(shader, atlas_texture);
+
+	// One raylib Mesh per terrain chunk, rebuilt when marked dirty.
+	std::array<std::array<Mesh, chunks>, chunks> meshes{};
+	std::array<std::array<bool, chunks>, chunks> has_mesh{};
 	std::array<std::array<bool, chunks>, chunks> dirty{};
 	for (auto &row : dirty)
 		row.fill(true);
@@ -83,14 +130,18 @@ auto main() -> int {
 	const auto rebuild = [&](cellulose::i32 p_cx, cellulose::i32 p_cz) {
 		if (!in_grid(p_cx, p_cz))
 			return;
-		Model &slot = models[static_cast<size_t>(p_cx)][static_cast<size_t>(p_cz)];
-		if (slot.meshCount > 0)
-			UnloadModel(slot);
-		slot = Model{};
-		const cellulose::ChunkMesh mesh = cellulose::mesh_chunk(
-				world, cellulose::ChunkPosition{ p_cx, 0, p_cz }, is_solid);
-		if (!mesh.empty())
-			slot = LoadModelFromMesh(cellulose::to_raylib_mesh(mesh, block_colour));
+		const auto ux = static_cast<size_t>(p_cx);
+		const auto uz = static_cast<size_t>(p_cz);
+		if (has_mesh[ux][uz]) {
+			UnloadMesh(meshes[ux][uz]);
+			has_mesh[ux][uz] = false;
+		}
+		const cellulose::ChunkMesh chunk_mesh = cellulose::mesh_chunk(
+				world, cellulose::ChunkPosition{ p_cx, 0, p_cz }, is_solid, registry);
+		if (!chunk_mesh.empty()) {
+			meshes[ux][uz] = cellulose::to_raylib_mesh(chunk_mesh, atlas);
+			has_mesh[ux][uz] = true;
+		}
 	};
 
 	// Mark an edited cell's chunk dirty, plus a neighbour chunk if the cell sits
@@ -144,7 +195,7 @@ auto main() -> int {
 		if (hit.has_value()) {
 			if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
 				if (auto *chunk = world.find_chunk(cellulose::to_chunk_position(hit->cell))) {
-					chunk->hot_attribute(cellulose::to_local_position(hit->cell)).block_id = 0;
+					chunk->hot_attribute(cellulose::to_local_position(hit->cell)).block_id = block_air;
 					touch(hit->cell);
 				}
 			} else if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) {
@@ -155,7 +206,7 @@ auto main() -> int {
 				};
 				const cellulose::ChunkPosition cp = cellulose::to_chunk_position(against);
 				if (in_grid(cp.x, cp.z) && cp.y == 0) {
-					world.chunk(cp).hot_attribute(cellulose::to_local_position(against)).block_id = 1;
+					world.chunk(cp).hot_attribute(cellulose::to_local_position(against)).block_id = block_grass;
 					touch(against);
 				}
 			}
@@ -175,9 +226,11 @@ auto main() -> int {
 		BeginMode3D(camera);
 		for (int cx = 0; cx < chunks; ++cx)
 			for (int cz = 0; cz < chunks; ++cz) {
-				const Model &slot = models[static_cast<size_t>(cx)][static_cast<size_t>(cz)];
-				if (slot.meshCount > 0)
-					DrawModel(slot, Vector3{ static_cast<float>(cx * edge), 0.0f, static_cast<float>(cz * edge) }, 1.0f, WHITE);
+				const auto ux = static_cast<size_t>(cx);
+				const auto uz = static_cast<size_t>(cz);
+				if (has_mesh[ux][uz])
+					DrawMesh(meshes[ux][uz], material,
+							MatrixTranslate(static_cast<float>(cx * edge), 0.0f, static_cast<float>(cz * edge)));
 			}
 		if (hit.has_value())
 			DrawCubeWires(
@@ -195,10 +248,12 @@ auto main() -> int {
 		EndDrawing();
 	}
 
-	for (auto &row : models)
-		for (Model &slot : row)
-			if (slot.meshCount > 0)
-				UnloadModel(slot);
+	for (cellulose::i32 cx = 0; cx < chunks; ++cx)
+		for (cellulose::i32 cz = 0; cz < chunks; ++cz)
+			if (has_mesh[static_cast<size_t>(cx)][static_cast<size_t>(cz)])
+				UnloadMesh(meshes[static_cast<size_t>(cx)][static_cast<size_t>(cz)]);
+	UnloadMaterial(material); // also unloads the shader
+	UnloadTexture(atlas_texture);
 	CloseWindow();
 	return 0;
 }
