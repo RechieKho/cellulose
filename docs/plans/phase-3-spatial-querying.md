@@ -61,7 +61,9 @@ predicate (needs `Block` to gain a solidity flag).
 - No API regression; all existing tests keep passing.
 - TDD per task: RED (analytic assertion fails) → GREEN → commit. Query tests use
   hand-built worlds with known solids and closed-form expected hits.
-- Queries must compile and pass with `-DCELLULOSE_SANITIZER=address`.
+- Queries must build clean under `-DCELLULOSE_SANITIZER=address`. (Running the
+  instrumented tests needs the MSVC ASan runtime DLL on `PATH`; that setup is a
+  CI concern — locally the portable fuzz / stress tests are the signal.)
 
 ---
 
@@ -175,7 +177,8 @@ predicate (needs `Block` to gain a solidity flag).
 
 1. Clean build, warning-free for `inc/cellulose/*`; `cellulose` + `cellulose_tests` link.
 2. `ctest` — all Phase 1–3 cases pass; Phase 1–2 cases unchanged.
-3. `-DCELLULOSE_SANITIZER=address` build of the tests is clean.
+3. `-DCELLULOSE_SANITIZER=address` configures + builds + links clean (running it
+   needs the ASan runtime on `PATH` — a CI job).
 4. Raycast cross-check: for a handful of random rays into a known scene, the hit
    matches a brute-force "step 0.01 along the ray until solid" reference.
 5. Collision cross-check: `move_aabb` with tiny sub-cell velocities integrated

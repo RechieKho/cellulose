@@ -225,16 +225,30 @@ signal.
 
 ---
 
-## 3. Spatial Querying — **designed, not built**
+## 3. Spatial Querying — **implemented** (plan: `docs/plans/phase-3-spatial-querying.md`)
 
-Three query types:
+**Math (`vector.hpp`):** `Vector3<T>` value type (`Vec3` = `f32`, `Vec3d` = `f64`,
+`Vec3i` = `i32`) with arithmetic, `operator[]` axis access, and free
+`dot` / `cross` / `length` / `normalized` / `component_min/max`. `Aabb{ min, max }`
+(f64) with `center` / `contains` / `intersects`. `to_cell(Vec3d) -> WorldPosition`
+(floor) and `to_point(WorldPosition) -> Vec3d`. No raylib dependency.
 
-1. **Raycasting** — optimized 3D DDA per Amanatides & Woo, *A Fast Voxel
-   Traversal Algorithm for Ray Tracing*.
-2. **Volumetric queries** — retrieval of voxel data within AABBs and spherical
-   regions.
-3. **Collision detection** — collision normals and positional corrections for a
-   target AABB + velocity vector; a baseline for custom physics integration.
+**Solidity predicate.** Every query takes `bool(const HotCellAttribute &)` — there
+is no built-in "solid" concept (`Block` only carries a name). A cell in an absent
+chunk is empty. Each cell is read as a **by-value snapshot under the chunk's hot
+seqlock**; predicates / visitors run outside that lock.
+
+| Query (`namespace cellulose`) | Behaviour |
+|-------------------------------|-----------|
+| `raycast(world, Ray{origin,direction}, max_distance, is_solid) -> optional<RaycastHit>` (`raycast.hpp`) | Amanatides & Woo 3-D DDA. `RaycastHit{ cell, normal (Vec3i entry face), distance }`. Ray starting inside a solid ⇒ that cell, `normal {0,0,0}`, `distance 0`. |
+| `for_each_cell_in_aabb(world, Aabb, visitor)` (`volume.hpp`) | `visitor(const WorldPosition&, const HotCellAttribute&)` for every existing cell overlapping the box; chunk-major, absent chunks skipped. |
+| `for_each_cell_in_sphere(world, center, radius, visitor)` | as above, restricted by a closest-point radius test (no corner clipping). |
+| `move_aabb(world, Aabb, velocity, is_solid) -> CollisionMove` (`collision.hpp`) | Axis-separated swept resolution (X, then Y, then Z): snap flush to the nearest solid per axis. `CollisionMove{ position (new box.min), normal (Vec3i, one component per blocked axis), collided }`. Exact for axis-aligned motion of any length; diagonal corner-order is approximate. |
+
+**Deferred:** raycast/volume chunk-pointer caching (re-resolve only on a chunk
+crossing); bulk whole-chunk snapshots for volume queries; continuous collision
+for very fast movers; sphere/capsule casts; a `BlockRegistry`-driven default
+solidity predicate (needs `Block` to gain a solidity flag).
 
 ---
 
@@ -274,6 +288,9 @@ Three query types:
 | D7 | functor accessors added **alongside** the bare ones; bare ones stay, unsynchronised |
 | D8–D9 | `cache_line_size` constant; `Chunk` + each lock `alignas`-padded to it |
 | D11 | `remove_chunk` requires caller-guaranteed quiescence (safe unload deferred) |
+| §3 | queries take a `bool(HotCellAttribute)` predicate; no built-in solidity; cells read as seqlock snapshots |
+| §3 | `raycast` = Amanatides & Woo DDA; `move_aabb` = axis-separated swept "collide and slide" |
+| §3 | `vector.hpp` (`Vector3<T>`, `Aabb`) is raylib-free — keeps C2 open |
 
 ## Known follow-ups (cross-cutting, not tied to one subsystem)
 

@@ -73,25 +73,24 @@ TSan-clean Linux build).
 
 ---
 
-## Phase 3 — Spatial Querying — **planned, not started**
+## Phase 3 — Spatial Querying — **complete**
 
 Design: `ARCHITECTURE_SPEC.md` §3. Plan (decisions D1–D10):
 `docs/plans/phase-3-spatial-querying.md`.
 
 - [x] Phase 3 implementation plan.
-- [ ] **T1** — `vector.hpp`: `Vector3<T>` (`Vec3`/`Vec3d`/`Vec3i`), `Aabb`,
-      `to_cell` / `to_point`.
-- [ ] **T2** — `raycast()` — Amanatides & Woo voxel DDA; hit cell, face normal,
-      distance.
-- [ ] **T3** — `for_each_cell_in_aabb` / `for_each_cell_in_sphere` volume queries.
-- [ ] **T4** — `move_aabb()` — axis-separated swept AABB-vs-voxel collision
-      (position correction + normal).
-- [ ] **T5** — umbrella + docs + sweep.
+- [x] **T1** — `vector.hpp`: `Vector3<T>` (`Vec3`/`Vec3d`/`Vec3i`, `operator[]`),
+      `Aabb`, `to_cell` / `to_point`.
+- [x] **T2** — `raycast()` — Amanatides & Woo voxel DDA; hit cell, entry-face
+      normal, distance; 200-ray fuzz cross-check.
+- [x] **T3** — `for_each_cell_in_aabb` / `for_each_cell_in_sphere`.
+- [x] **T4** — `move_aabb()` — axis-separated swept AABB-vs-voxel collision.
+- [x] **T5** — umbrella + `ARCHITECTURE_SPEC` §3 + this file; suite 49/49.
 
-All queries take a caller `bool(const HotCellAttribute &)` solidity predicate and
-read cells through the per-chunk seqlock. Deferrals (see plan): raycast chunk
-caching, bulk chunk snapshots, continuous collision, sphere/capsule casts,
-registry-driven solidity.
+All queries take a caller `bool(const HotCellAttribute &)` predicate and read
+cells as by-value snapshots through the per-chunk seqlock. Deferrals moved to the
+backlog: raycast/volume chunk caching, bulk chunk snapshots, continuous
+collision, sphere/capsule casts, registry-driven solidity.
 
 ---
 
@@ -142,4 +141,13 @@ Design: `ARCHITECTURE_SPEC.md` §4.
 - [ ] **`BlockRegistryBuilder::build()` bug** (pre-existing). `build()` pre-sizes
       `Store` to N default blocks then `push_back`s N more, and fills
       `name_id_map` with indices 0..N-1 while the real blocks land at N..2N-1.
-      Blocks a `BlockRegistry`-backed solidity predicate for Phase 3 queries.
+      Blocks a `BlockRegistry`-backed solidity predicate for spatial queries.
+- [ ] **Spatial-query performance** (deferred from Phase 3). `raycast` and the
+      `for_each_cell_in_*` queries do a `find_chunk` (+ directory shared-lock)
+      per cell. Cache the current `Chunk*` and re-resolve only when crossing a
+      chunk boundary; for volume queries, one bulk `read_hot` per chunk copying
+      the local sub-range.
+- [ ] **Continuous collision** (deferred from Phase 3). `move_aabb` is exact per
+      axis but resolves axes in a fixed X→Y→Z order; add conservative
+      advancement / a swept test for fast diagonal movers if needed.
+- [ ] **Sphere / capsule casts** (deferred from Phase 3).
