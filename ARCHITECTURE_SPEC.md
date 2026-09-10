@@ -299,7 +299,7 @@ one `find_chunk` per cell — cache the ≤27 touched chunk pointers.
 | R2 | `coordinate.hpp` independent of `chunk.hpp`; literal `5`/`31` + comment |
 | R5 | `ChunkPositionHash` may use `unordered_dense::detail::wyhash` |
 | C1 | **resolved** — `World` stores `unique_ptr<Chunk>`; `Chunk*` is stable across insert + erase |
-| C2 | `cellulose_tests` links raylib transitively though no test uses it |
+| C2 | **resolved** — raylib is off the `libcellulose` INTERFACE; only the demo executable links it |
 | D1 | `World` chunk storage = `unordered_dense::map<…, unique_ptr<Chunk>>` (not `segmented_map` — that is not erase-stable) |
 | D2 | a `std::shared_mutex` guards the `World` directory (table), separate from per-chunk locks |
 | D3–D5 | hot & cold tiers each get a `SeqLock` + a writer `std::mutex`; read functor returns by value |
@@ -309,7 +309,7 @@ one `find_chunk` per cell — cache the ≤27 touched chunk pointers.
 | D11 | `remove_chunk` requires caller-guaranteed quiescence (safe unload deferred) |
 | §3 | queries take a `bool(HotCellAttribute)` predicate; no built-in solidity; cells read as seqlock snapshots |
 | §3 | `raycast` = Amanatides & Woo DDA; `move_aabb` = axis-separated swept "collide and slide" |
-| §3 | `vector.hpp` (`Vector3<T>`, `Aabb`) is raylib-free — keeps C2 open |
+| §3 | `vector.hpp` (`Vector3<T>`, `Aabb`) is raylib-free |
 | §4 | mesher output is renderer-neutral (`MeshVertex` / `ChunkMesh`); raylib bridge lives only in the demo |
 | §4 | greedy meshing with `(block_id, face-brightness)` merge keys + hidden-face culling; cubes only (orientation bits unused) |
 | §4 | LOD = any-solid macro-cells, first-solid attributes, quads scaled by `1 << level` |

@@ -132,14 +132,14 @@ sampler chunk-pointer caching.
 - [ ] **Reconcile cold-data size.** `PackedCellAttributeCollection` requires
       element `sizeof <= 8`; README describes cold data as "> 8 bytes". Resolve
       when the first concrete cold type lands.
-- [ ] **C2 — raylib-free core target.** `cellulose_tests` links raylib
-      transitively via the INTERFACE lib though no test uses it. Consider a
-      renderer-free core `INTERFACE` target.
-- [ ] **R2 coupling.** `coordinate.hpp` hardcodes `5` / `31` to avoid depending
-      on `chunk.hpp`'s `chunk_edge_length`. If the edge length is ever made
-      configurable, relocate the constant or add a coupling `static_assert`.
-- [ ] **`to_chunk_position` narrowing.** Unguarded `i64 -> i32` on the chunk
-      axis — document or assert the effective world-size boundary.
+- [x] **C2 — raylib-free core target.** raylib is off the `libcellulose`
+      INTERFACE (verified: `cellulose_tests.vcxproj` has zero raylib refs); only
+      the demo executable links it.
+- [x] **R2 coupling.** `coordinate.hpp` exposes `chunk_edge_length_shift` /
+      `chunk_edge_length_mask`; `chunk.hpp` `static_assert`s
+      `chunk_edge_length == (1 << chunk_edge_length_shift)`.
+- [x] **`to_chunk_position` narrowing.** Documented: correct while
+      `|axis| < 2^(31 + shift)` (≈ ±2^36 blocks).
 - [ ] **Thread-safe chunk unload** (deferred from Phase 2). Reclaiming a `Chunk`
       while worker threads may hold a `Chunk*` needs `shared_ptr` / hazard
       pointers / epoch reclamation. Until then `remove_chunk` requires the caller

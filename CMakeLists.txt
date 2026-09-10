@@ -75,11 +75,13 @@ set(SOURCE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/src")
 set(INCLUDE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/inc")
 file(GLOB_RECURSE SOURCE_FILES "${SOURCE_DIRECTORY}/*.cpp")
 
+# The core library is header-only and renderer-free: raylib is NOT an interface
+# dependency, so `cellulose_tests` and any embedder linking `libcellulose` do not
+# pull the renderer. Only the demo executable links raylib.
 add_library(${LIBRARY_NAME} INTERFACE)
 target_include_directories(${LIBRARY_NAME} INTERFACE ${INCLUDE_DIRECTORY})
 target_link_libraries(${LIBRARY_NAME}
     INTERFACE
-    raylib
     libmorton
     unordered_dense
     fmt
@@ -91,6 +93,7 @@ target_link_libraries(
     ${EXECUTABLE_NAME}
     PRIVATE
     ${LIBRARY_NAME}
+    raylib
 )
 
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
