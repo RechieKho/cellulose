@@ -151,10 +151,12 @@ auto main() -> int {
 					.add_block_builder(cellulose::BlockBuilder("stone").texture_all(tex_stone))
 					.build();
 
-	SetConfigFlags(FLAG_MSAA_4X_HINT); // smooth the silhouettes; T-junctions are welded in the mesh
+	// VSYNC stops screen tearing; MSAA smooths the silhouettes (T-junctions are
+	// welded in the mesh itself).
+	SetConfigFlags(FLAG_VSYNC_HINT | FLAG_MSAA_4X_HINT);
 	InitWindow(1280, 720, "cellulose - minimal voxel game");
 	DisableCursor();
-	SetTargetFPS(60);
+	SetTargetFPS(60); // fallback cap if the driver ignores the vsync hint
 
 	const std::array<cellulose::TextureID, 4> ids{ tex_grass_top, tex_grass_side, tex_dirt, tex_stone };
 	const cellulose::PackedAtlas packed = cellulose::pack_grid(ids, tile_px);

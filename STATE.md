@@ -209,7 +209,8 @@ stricter. Two classes of thing that bit here and will bite again:
     resolver. Don't remove those constraints. AO: level-0 only, occluder test is
     `has_geometry`. `weld_t_junctions`: a post-pass over `greedy_mesh`'s output
     (quads are 4 verts + 6 indices), **centroid** fan on split quads (a corner
-    fan slivers), unsplit quads verbatim; the demo also enables MSAA.
+    fan slivers), unsplit quads verbatim; the demo also sets
+    `FLAG_VSYNC_HINT | FLAG_MSAA_4X_HINT` (tearing + silhouette aliasing).
 
 ---
 
