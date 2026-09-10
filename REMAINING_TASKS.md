@@ -47,25 +47,25 @@ Suite after close-out: **21/21** green; configure + build warning-free for
 
 ---
 
-## Phase 2 — Concurrency & Thread Safety — **not started**
+## Phase 2 — Concurrency & Thread Safety — **planned, not started**
 
-Design: `ARCHITECTURE_SPEC.md` §2. Chunk-level granularity.
+Design: `ARCHITECTURE_SPEC.md` §2. Full plan (with decisions D1–D11):
+`docs/plans/phase-2-concurrency.md`.
 
-- [ ] **Resolve chunk-pointer invalidation (C1) first.** `World` value-stores
-      ~131 KB chunks in `unordered_dense::map`; inserts rehash and move every
-      chunk. Evaluate `unordered_dense::segmented_map` or
-      `unique_ptr<Chunk>` values so chunk addresses are stable — a prerequisite
-      for handing chunk references to worker threads.
-- [ ] **Sequence lock** primitive for the hot and cold arrays: optimistic
-      unblocked reads, no writer starvation; torn reads retried. Fixed-size
-      arrays make concurrent updates memory-safe.
-- [ ] **Read-write lock** primitive for the freezing-cold sparse lists.
-- [ ] Integrate the locks into `Chunk` (per-chunk lock state).
-- [ ] **False-sharing elimination:** `alignas` chunks to
-      `std::hardware_destructive_interference_size`; pad internal chunk locks to
-      isolate lock state from adjacent voxel data.
-- [ ] Concurrency stress tests (readers vs. writers; meshing while editing).
-- [ ] Write the Phase 2 implementation plan before starting.
+- [x] Write the Phase 2 implementation plan.
+- [ ] **T1** — `Threads::Threads` link + `CELLULOSE_SANITIZER` (TSan) build option.
+- [ ] **T2** — `sync.hpp`: `cache_line_size` constant + `Padded<T>` helper.
+- [ ] **T3** — `SeqLock` primitive (optimistic reads, retry loop) + stress test.
+- [ ] **T4** — `RWLock` primitive (`std::shared_mutex` wrapper) for the sparse tier.
+- [ ] **T5** — embed hot/cold seqlocks + sparse rwlock in `Chunk`; `alignas`;
+      functor accessors (`read_hot` / `write_hot` / …) alongside the bare ones.
+- [ ] **T6** — `World`: store chunks behind `unique_ptr` (fixes C1 — stable across
+      insert *and* erase), guard the directory with a `shared_mutex`, add a
+      functor `with_hot_attribute`.
+- [ ] **T7** — docs + full suite sweep (plain + TSan green).
+
+Deferred out of Phase 2 (see plan): thread-safe chunk *unload* under live
+readers; sharded / lock-free world directory; CAS single-writer seqlock claim.
 
 ---
 
@@ -115,3 +115,10 @@ Design: `ARCHITECTURE_SPEC.md` §4.
       configurable, relocate the constant or add a coupling `static_assert`.
 - [ ] **`to_chunk_position` narrowing.** Unguarded `i64 -> i32` on the chunk
       axis — document or assert the effective world-size boundary.
+- [ ] **Thread-safe chunk unload** (deferred from Phase 2). Reclaiming a `Chunk`
+      while worker threads may hold a `Chunk*` needs `shared_ptr` / hazard
+      pointers / epoch reclamation. Until then `remove_chunk` requires the caller
+      to guarantee quiescence.
+- [ ] **World directory scaling** (deferred from Phase 2). If the single
+      `shared_mutex` over the chunk map contends under many loader threads, shard
+      by hash bits or move to a concurrent map. Measure first.

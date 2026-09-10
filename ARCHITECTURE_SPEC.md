@@ -174,7 +174,7 @@ was dropped.)
 
 ---
 
-## 2. Concurrency & Thread Safety — **designed, not built**
+## 2. Concurrency & Thread Safety — **planned** (`docs/plans/phase-2-concurrency.md`)
 
 Concurrency is managed at the **chunk level** — world-level locking causes severe
 contention; per-block locking needs false-sharing padding around every block at
@@ -196,8 +196,10 @@ False-sharing elimination:
 - Internal chunk locks padded to isolate lock-state synchronisation from adjacent
   voxel data.
 
-This subsystem must also resolve C1 (see §1.5): pick a chunk container that gives
-stable chunk addresses under insertion.
+The plan also resolves C1 (see §1.5): `World` will store chunks behind
+`std::unique_ptr` so a `Chunk*` stays valid across directory inserts *and*
+erases, with a `std::shared_mutex` guarding the directory itself (distinct from
+the per-chunk voxel-data locks).
 
 ---
 
