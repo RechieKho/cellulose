@@ -19,6 +19,12 @@ inline constexpr size chunk_edge_length = 32;
 /// @brief Total number of cells in a chunk.
 inline constexpr size chunk_cell_count = chunk_edge_length * chunk_edge_length * chunk_edge_length;
 
+// Ties `coordinate.hpp`'s hardcoded shift/mask to the edge length (that header
+// must stay independent of this one — see `chunk_edge_length_shift`).
+static_assert(
+		chunk_edge_length == (size{ 1 } << chunk_edge_length_shift),
+		"`chunk_edge_length` must equal `1 << chunk_edge_length_shift`.");
+
 namespace impl {
 
 /// @brief A seqlock plus the mutex that serialises its writers, for one attribute tier.

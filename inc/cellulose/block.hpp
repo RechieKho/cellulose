@@ -107,7 +107,8 @@ public:
 
 	auto build() -> BlockRegistry<> {
 		auto name_id_map = typename BlockRegistry<>::NameIDMap();
-		auto store = typename BlockRegistry<>::Store(m_block_builders.size());
+		auto store = typename BlockRegistry<>::Store();
+		store.reserve(m_block_builders.size());
 
 		for (size i = 0; auto &builder : m_block_builders) {
 			const auto &name = builder.name;
@@ -116,7 +117,7 @@ public:
 				throw std::logic_error(
 						fmt::format("Block name of `{}` already existed, name of block must be unique.", name));
 
-			name_id_map[name] = i;
+			name_id_map[name] = static_cast<BlockID>(i);
 			store.push_back(builder.build());
 
 			++i;
@@ -131,6 +132,11 @@ public:
 };
 
 } //namespace impl
+
+using Block = impl::Block<>;
+using BlockRegistry = impl::BlockRegistry<>;
+using BlockBuilder = impl::BlockBuilder<>;
+using BlockRegistryBuilder = impl::BlockRegistryBuilder<>;
 
 } //namespace cellulose
 
