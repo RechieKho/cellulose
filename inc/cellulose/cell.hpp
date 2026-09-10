@@ -5,7 +5,9 @@
 #include "types.hpp"
 #include <ankerl/unordered_dense.h>
 #include <array>
+#include <concepts>
 #include <tuple>
+#include <type_traits>
 
 namespace cellulose {
 
@@ -229,6 +231,43 @@ template <size CellCount, typename... Attributes>
 using PackedCellAttributeCollection = impl::PackedCellAttributeCollection<CellCount, Attributes...>;
 template <typename... Attributes>
 using SparseCellAttributeCollection = impl::SparseCellAttributeCollection<Attributes...>;
+
+/// @brief The contract `Chunk`'s hot attribute type must satisfy. Only `block_id`
+/// is required — it is what every query answers ("what block did I hit"). The
+/// type must also be trivially copyable (the seqlock snapshots it by value) and
+/// default-initialisable (a fresh chunk zero-fills its hot array).
+///
+/// Consumers may use their own hot type (`Chunk<MyHotCell>`); `HotCellAttribute`
+/// is the batteries-included default. The mesher additionally reads per-face
+/// brightness through `face_brightness` (below) when it is available.
+template <typename T>
+concept HotAttribute =
+		std::is_trivially_copyable_v<T> &&
+		std::default_initializable<T> &&
+		requires(const T p_attribute) {
+	{ p_attribute.block_id }->std::convertible_to<BlockID>;
+};
+
+/// @brief Mesher customization point: the 2-bit brightness of face `p_face`
+/// (`0..5` = `+X -X +Y -Y +Z -Z`). Overload this for a custom hot type to get lit
+/// geometry; without an overload the mesher flat-shades.
+constexpr auto face_brightness(const HotCellAttribute &p_attribute, i32 p_face) -> u8 {
+	switch (p_face) {
+		case 0:
+			return p_attribute.get_right_face_brightness();
+		case 1:
+			return p_attribute.get_left_face_brightness();
+		case 2:
+			return p_attribute.get_top_face_brightness();
+		case 3:
+			return p_attribute.get_bottom_face_brightness();
+		case 4:
+			return p_attribute.get_back_face_brightness();
+		default:
+			return p_attribute.get_front_face_brightness();
+	}
+}
+
 } //namespace cellulose
 
 #endif // CEL_CELL_ATTRIBUTE_HPP

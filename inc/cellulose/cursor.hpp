@@ -19,6 +19,10 @@ namespace impl {
 /// mesher's apron. Assumes the chunks it visits are not unloaded mid-walk.
 template <typename WorldType>
 class ChunkCursor final {
+public:
+	using HotAttributeType = typename WorldType::HotAttributeType;
+
+private:
 	WorldType &m_world;
 	ChunkPosition m_chunk_position{};
 	bool m_resolved = false;
@@ -37,7 +41,7 @@ public:
 
 	/// @brief Snapshot of the hot attribute at `p_cell` under its chunk's seqlock,
 	/// or `nullopt` when that chunk is not loaded.
-	auto hot(const WorldPosition &p_cell) -> std::optional<cellulose::HotCellAttribute> {
+	auto hot(const WorldPosition &p_cell) -> std::optional<HotAttributeType> {
 		resolve(to_chunk_position(p_cell));
 		if (m_chunk == nullptr)
 			return std::nullopt;

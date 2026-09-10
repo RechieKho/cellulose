@@ -50,8 +50,9 @@ TEST_CASE("hot attributes are writable by cell index and readable through a cons
 
 TEST_CASE("chunk exposes its packed and sparse collections") {
 	cellulose::Chunk<
-			cellulose::PackedCellAttributeCollection<cellulose::chunk_cell_count, cellulose::u16>,
-			cellulose::SparseCellAttributeCollection<std::array<cellulose::u8, 16>>>
+			cellulose::HotCellAttribute,
+			cellulose::PackedChunkAttributes<cellulose::u16>,
+			cellulose::SparseChunkAttributes<std::array<cellulose::u8, 16>>>
 			chunk;
 
 	chunk.packed().get<cellulose::u16>()[3] = 7;
@@ -61,8 +62,9 @@ TEST_CASE("chunk exposes its packed and sparse collections") {
 
 TEST_CASE("functor accessors round-trip each tier under its lock") {
 	cellulose::Chunk<
-			cellulose::PackedCellAttributeCollection<cellulose::chunk_cell_count, cellulose::u16>,
-			cellulose::SparseCellAttributeCollection<std::array<cellulose::u8, 16>>>
+			cellulose::HotCellAttribute,
+			cellulose::PackedChunkAttributes<cellulose::u16>,
+			cellulose::SparseChunkAttributes<std::array<cellulose::u8, 16>>>
 			chunk;
 
 	const auto index = cellulose::encode_cell_index(cellulose::LocalPosition{ 4, 5, 6 });
@@ -84,6 +86,21 @@ TEST_CASE("functor accessors round-trip each tier under its lock") {
 		return sparse.template get<std::array<cellulose::u8, 16>>().contains(index);
 	});
 	CHECK(present);
+}
+
+TEST_CASE("revision advances on every write and not on reads") {
+	cellulose::Chunk<> chunk;
+	CHECK(chunk.revision() == 0);
+
+	chunk.write_hot([](auto &hot) { hot[0].block_id = 1; });
+	const auto after_write = chunk.revision();
+	CHECK(after_write > 0);
+
+	(void)chunk.read_hot([](const auto &hot) { return hot[0].block_id; });
+	CHECK(chunk.revision() == after_write);
+
+	chunk.write_hot([](auto &) {}); // even a no-op write bumps it (conservative)
+	CHECK(chunk.revision() > after_write);
 }
 
 // The writer keeps block_id == state; a torn read (seen without the seqlock)

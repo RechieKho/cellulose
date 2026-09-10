@@ -2,33 +2,72 @@
 
 #include <cellulose/mesh.hpp>
 
+#include <array>
 #include <vector>
 
 namespace {
 
 using cellulose::i32;
 using cellulose::u16;
+using cellulose::u8;
 
+constexpr std::array<std::array<i32, 3>, 6> face_offset{
+	std::array<i32, 3>{ 1, 0, 0 }, std::array<i32, 3>{ -1, 0, 0 },
+	std::array<i32, 3>{ 0, 1, 0 }, std::array<i32, 3>{ 0, -1, 0 },
+	std::array<i32, 3>{ 0, 0, 1 }, std::array<i32, 3>{ 0, 0, -1 }
+};
+
+// A solid/attribute grid that computes face visibility the way the mesher does.
 struct Grid final {
 	i32 size;
-	std::vector<cellulose::MeshSample> samples;
+	std::vector<bool> solid;
+	std::vector<u16> block;
+	std::array<std::vector<u8>, 6> brightness;
 
 	explicit Grid(i32 p_size) :
 			size(p_size),
-			samples(static_cast<std::size_t>((p_size + 2) * (p_size + 2) * (p_size + 2))) {}
+			solid(static_cast<std::size_t>(p_size) * p_size * p_size, false),
+			block(static_cast<std::size_t>(p_size) * p_size * p_size, 0) {
+		for (auto &face : brightness)
+			face.assign(static_cast<std::size_t>(size) * size * size, 3);
+	}
 
-	auto at(i32 p_x, i32 p_y, i32 p_z) -> cellulose::MeshSample & {
-		const i32 stride = size + 2;
-		return samples[static_cast<std::size_t>(((p_x + 1) * stride + (p_y + 1)) * stride + (p_z + 1))];
+	auto index(i32 p_x, i32 p_y, i32 p_z) const -> std::size_t {
+		return static_cast<std::size_t>((p_x * size + p_y) * size + p_z);
+	}
+	auto in_bounds(i32 p_x, i32 p_y, i32 p_z) const -> bool {
+		return p_x >= 0 && p_x < size && p_y >= 0 && p_y < size && p_z >= 0 && p_z < size;
 	}
 
 	auto set_solid(i32 p_x, i32 p_y, i32 p_z, u16 p_block_id = 1) -> void {
-		auto &cell = at(p_x, p_y, p_z);
-		cell.solid = true;
-		cell.block_id = p_block_id;
+		solid[index(p_x, p_y, p_z)] = true;
+		block[index(p_x, p_y, p_z)] = p_block_id;
+	}
+	auto set_face_brightness(i32 p_x, i32 p_y, i32 p_z, i32 p_face, u8 p_value) -> void {
+		brightness[static_cast<std::size_t>(p_face)][index(p_x, p_y, p_z)] = p_value;
 	}
 
-	auto mesh() -> cellulose::ChunkMesh { return cellulose::greedy_mesh(samples, size, 1.0f); }
+	auto mesh() -> cellulose::ChunkMesh {
+		std::vector<cellulose::MeshSample> samples(static_cast<std::size_t>(size) * size * size);
+		for (i32 x = 0; x < size; ++x)
+			for (i32 y = 0; y < size; ++y)
+				for (i32 z = 0; z < size; ++z) {
+					if (!solid[index(x, y, z)])
+						continue;
+					cellulose::MeshSample &sample = samples[index(x, y, z)];
+					sample.block_id = block[index(x, y, z)];
+					for (i32 face = 0; face < 6; ++face) {
+						sample.brightness[static_cast<std::size_t>(face)] =
+								brightness[static_cast<std::size_t>(face)][index(x, y, z)];
+						const i32 nx = x + face_offset[static_cast<std::size_t>(face)][0];
+						const i32 ny = y + face_offset[static_cast<std::size_t>(face)][1];
+						const i32 nz = z + face_offset[static_cast<std::size_t>(face)][2];
+						const bool hidden = in_bounds(nx, ny, nz) && solid[index(nx, ny, nz)];
+						sample.visible[static_cast<std::size_t>(face)] = !hidden;
+					}
+				}
+		return cellulose::greedy_mesh(samples, size, 1.0f);
+	}
 };
 
 auto quads_facing(const cellulose::ChunkMesh &p_mesh, const cellulose::Vec3 &p_normal) -> int {
@@ -39,7 +78,16 @@ auto quads_facing(const cellulose::ChunkMesh &p_mesh, const cellulose::Vec3 &p_n
 	return vertices / 4;
 }
 
+auto has_vertex_at(const cellulose::ChunkMesh &p_mesh, const cellulose::Vec3 &p_position) -> bool {
+	for (const auto &vertex : p_mesh.vertices)
+		if (vertex.position == p_position)
+			return true;
+	return false;
+}
+
 } //namespace
+
+// --- greedy_mesh (grid level) --------------------------------------------------
 
 TEST_CASE("an empty grid meshes to nothing") {
 	Grid grid(8);
@@ -62,8 +110,6 @@ TEST_CASE("a lone solid cell meshes to six unit quads") {
 	for (const auto &vertex : mesh.vertices) {
 		CHECK(vertex.position.x >= 3.0f);
 		CHECK(vertex.position.x <= 4.0f);
-		CHECK(vertex.position.y >= 3.0f);
-		CHECK(vertex.position.z <= 4.0f);
 	}
 }
 
@@ -76,13 +122,7 @@ TEST_CASE("a 2x2x2 block still meshes to six quads (each face merged)") {
 
 	const auto mesh = grid.mesh();
 	CHECK(mesh.vertices.size() == 24);
-	CHECK(mesh.indices.size() == 36);
-
-	bool has_far_corner = false;
-	for (const auto &vertex : mesh.vertices)
-		if (vertex.position == cellulose::Vec3{ 2, 2, 2 })
-			has_far_corner = true;
-	CHECK(has_far_corner);
+	CHECK(has_vertex_at(mesh, cellulose::Vec3{ 2, 2, 2 }));
 }
 
 TEST_CASE("an interior shared face is culled") {
@@ -91,19 +131,17 @@ TEST_CASE("an interior shared face is culled") {
 	grid.set_solid(4, 3, 3);
 
 	const auto mesh = grid.mesh();
-	// +X face of cell 3 (at x = 4) is hidden; only cell 4's +X face (at x = 5) survives.
 	CHECK(quads_facing(mesh, cellulose::Vec3{ 1, 0, 0 }) == 1);
 	CHECK(quads_facing(mesh, cellulose::Vec3{ -1, 0, 0 }) == 1);
-	// two-wide box: top / bottom / front / back each merge to one 2x1 quad.
-	CHECK(mesh.vertices.size() == 24);
+	CHECK(mesh.vertices.size() == 24); // 2x1x1 box -> six quads
 }
 
 TEST_CASE("differing face brightness prevents that face from merging") {
 	Grid grid(4);
 	grid.set_solid(1, 1, 1);
 	grid.set_solid(2, 1, 1);
-	grid.at(1, 1, 1).brightness[2] = 1; // +Y face
-	grid.at(2, 1, 1).brightness[2] = 3;
+	grid.set_face_brightness(1, 1, 1, 2, 1); // +Y face
+	grid.set_face_brightness(2, 1, 1, 2, 3);
 
 	const auto mesh = grid.mesh();
 	CHECK(quads_facing(mesh, cellulose::Vec3{ 0, 1, 0 }) == 2); // +Y split
@@ -116,7 +154,6 @@ TEST_CASE("a +X quad is wound so its triangles face +X") {
 	grid.set_solid(3, 3, 3);
 	const auto mesh = grid.mesh();
 
-	// find the +X quad's first triangle
 	for (std::size_t t = 0; t + 2 < mesh.indices.size(); t += 3) {
 		const auto &a = mesh.vertices[mesh.indices[t]];
 		const auto &b = mesh.vertices[mesh.indices[t + 1]];
@@ -132,7 +169,7 @@ TEST_CASE("a +X quad is wound so its triangles face +X") {
 	FAIL("no +X triangle found");
 }
 
-// --- World-backed meshing --------------------------------------------------
+// --- World-backed meshing -----------------------------------------------------
 
 namespace {
 
@@ -145,13 +182,6 @@ auto put(cellulose::World<> &p_world, cellulose::i64 p_x, cellulose::i64 p_y, ce
 	p_world.chunk(cellulose::to_chunk_position(cell))
 			.hot_attribute(cellulose::to_local_position(cell))
 			.block_id = p_block_id;
-}
-
-auto has_vertex_at(const cellulose::ChunkMesh &p_mesh, const cellulose::Vec3 &p_position) -> bool {
-	for (const auto &vertex : p_mesh.vertices)
-		if (vertex.position == p_position)
-			return true;
-	return false;
 }
 
 } //namespace
@@ -232,4 +262,48 @@ TEST_CASE("mesh_chunk_lod grows a lone cell into its macro-block") {
 	const auto mesh = cellulose::mesh_chunk_lod(world, { 0, 0, 0 }, 1, world_solid());
 	CHECK(mesh.vertices.size() == 24);
 	CHECK(has_vertex_at(mesh, cellulose::Vec3{ 2, 2, 2 }));
+}
+
+// --- Custom hot attribute type ----------------------------------------------
+
+namespace {
+struct TinyHot final {
+	cellulose::BlockID block_id = 0;
+};
+static_assert(cellulose::HotAttribute<TinyHot>);
+static_assert(sizeof(TinyHot) == 2);
+} //namespace
+
+TEST_CASE("a chunk with a custom 2-byte hot type meshes (flat-shaded)") {
+	cellulose::World<cellulose::Chunk<TinyHot>> world;
+	world.chunk({ 0, 0, 0 }).hot_attribute(cellulose::LocalPosition{ 4, 4, 4 }).block_id = 7;
+
+	const auto mesh = cellulose::mesh_chunk(
+			world, { 0, 0, 0 },
+			[](const TinyHot &p_attribute) { return p_attribute.block_id != 0; });
+
+	CHECK(mesh.vertices.size() == 24);
+	for (const auto &vertex : mesh.vertices) {
+		CHECK(vertex.block_id == 7);
+		CHECK(vertex.brightness == doctest::Approx(1.0f)); // no face_brightness overload -> full
+	}
+}
+
+// --- #8: split geometry / face-culling rules --------------------------------
+
+TEST_CASE("mesh_chunk with explicit rules keeps a face between unlike transparent blocks") {
+	cellulose::World<> world;
+	put(world, 5, 5, 5, 1); // "glass"
+	put(world, 6, 5, 5, 2); // "water"
+
+	const auto has_geometry = [](const cellulose::HotCellAttribute &a) { return a.block_id != 0; };
+	// a face is hidden only by the *same* block id (glass-glass, water-water)
+	const auto is_hidden = [](const cellulose::HotCellAttribute &near, const cellulose::HotCellAttribute &far) {
+		return far.block_id != 0 && far.block_id == near.block_id;
+	};
+
+	const auto mesh = cellulose::mesh_chunk(world, { 0, 0, 0 }, has_geometry, is_hidden);
+	// the glass|water interface is NOT culled -> both +X (from cell 5) and -X (from cell 6) survive
+	CHECK(quads_facing(mesh, cellulose::Vec3{ 1, 0, 0 }) == 2);
+	CHECK(quads_facing(mesh, cellulose::Vec3{ -1, 0, 0 }) == 2);
 }

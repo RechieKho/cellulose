@@ -12,10 +12,10 @@
 
 namespace cellulose {
 
-/// @brief Call `p_visitor(const WorldPosition &, const HotCellAttribute &)` for
-/// every **existing** cell whose unit voxel overlaps `p_box`. Iteration is
-/// chunk-major: absent chunks are skipped. Each cell is a by-value snapshot taken
-/// under the chunk's hot seqlock; the visitor runs outside that lock.
+/// @brief Call `p_visitor(const WorldPosition &, const HotAttribute &)` for every
+/// **existing** cell whose unit voxel overlaps `p_box`. Iteration is chunk-major:
+/// absent chunks are skipped. Each cell is a by-value snapshot taken under the
+/// chunk's hot seqlock; the visitor runs outside that lock.
 template <typename WorldType, typename Visitor>
 auto for_each_cell_in_aabb(WorldType &p_world, const Aabb &p_box, Visitor &&p_visitor) -> void {
 	const WorldPosition lo = to_cell(p_box.min);
@@ -30,7 +30,7 @@ auto for_each_cell_in_aabb(WorldType &p_world, const Aabb &p_box, Visitor &&p_vi
 	for (i32 cx = chunk_lo.x; cx <= chunk_hi.x; ++cx)
 		for (i32 cy = chunk_lo.y; cy <= chunk_hi.y; ++cy)
 			for (i32 cz = chunk_lo.z; cz <= chunk_hi.z; ++cz) {
-				auto *chunk = p_world.find_chunk(ChunkPosition{ cx, cy, cz });
+				auto chunk = p_world.find_chunk(ChunkPosition{ cx, cy, cz });
 				if (chunk == nullptr)
 					continue;
 
@@ -70,7 +70,7 @@ auto for_each_cell_in_sphere(WorldType &p_world, const Vec3d &p_center, f64 p_ra
 
 	for_each_cell_in_aabb(
 			p_world, bounds,
-			[&](const WorldPosition &p_cell, const HotCellAttribute &p_attribute) {
+			[&](const WorldPosition &p_cell, const auto &p_attribute) {
 				const Vec3d min = to_point(p_cell);
 				const Vec3d max = min + Vec3d{ 1.0, 1.0, 1.0 };
 				const Vec3d closest{

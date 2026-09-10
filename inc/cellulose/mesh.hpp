@@ -10,6 +10,7 @@
 #include "vector.hpp"
 #include "world.hpp"
 #include <array>
+#include <optional>
 #include <vector>
 
 namespace cellulose {
@@ -35,10 +36,11 @@ struct ChunkMesh final {
 	auto empty() const -> bool { return vertices.empty(); }
 };
 
-/// @brief One cell of the local grid the greedy mesher runs over. `brightness`
-/// is indexed by face `0..5` = `+X -X +Y -Y +Z -Z`.
+/// @brief One cell of the grid the greedy mesher runs over. `visible[f]` is `true`
+/// when face `f` (`0..5` = `+X -X +Y -Y +Z -Z`) should emit a quad; `brightness`
+/// is per face. A cell with no visible face contributes nothing.
 struct MeshSample final {
-	bool solid = false;
+	std::array<bool, 6> visible{};
 	u16 block_id = 0;
 	std::array<u8, 6> brightness{};
 };
@@ -84,19 +86,16 @@ inline auto emit_quad(
 
 } //namespace impl
 
-/// @brief Greedy-mesh an `(p_size + 2)^3` apron grid whose interior is `p_size^3`.
-///
-/// `p_samples` is indexed `((x + 1) * stride + (y + 1)) * stride + (z + 1)` with
-/// `stride = p_size + 2` and `x, y, z` in `-1 .. p_size` (the `-1` / `p_size`
-/// shell only needs `solid` set, for neighbour culling). Every quad — position
-/// and size — is multiplied by `p_block_scale`, so a downsampled grid still spans
-/// `[0, p_size * (1 << level)]`.
+/// @brief Greedy-mesh a `p_size^3` grid of `MeshSample` (indexed
+/// `(x * p_size + y) * p_size + z`). For each face direction and slice it builds a
+/// `(block_id << 8 | brightness) + 1` key mask over the cells whose face is
+/// `visible`, merges maximal rectangles, and emits CCW-wound quads scaled by
+/// `p_block_scale` (so a downsampled grid still spans `[0, p_size * p_block_scale]`).
 inline auto greedy_mesh(const std::vector<MeshSample> &p_samples, i32 p_size, f32 p_block_scale) -> ChunkMesh {
 	ChunkMesh mesh;
-	const i32 stride = p_size + 2;
 
 	const auto at = [&](i32 p_x, i32 p_y, i32 p_z) -> const MeshSample & {
-		return p_samples[static_cast<size>(((p_x + 1) * stride + (p_y + 1)) * stride + (p_z + 1))];
+		return p_samples[static_cast<size>((p_x * p_size + p_y) * p_size + p_z)];
 	};
 
 	for (i32 face = 0; face < 6; ++face) {
@@ -116,15 +115,11 @@ inline auto greedy_mesh(const std::vector<MeshSample> &p_samples, i32 p_size, f3
 					cell[static_cast<size>(axis_v)] = vv;
 
 					const MeshSample &sample = at(cell[0], cell[1], cell[2]);
-					u32 key = 0;
-					if (sample.solid) {
-						std::array<i32, 3> neighbour = cell;
-						neighbour[static_cast<size>(axis)] += sign;
-						if (!at(neighbour[0], neighbour[1], neighbour[2]).solid)
-							key = ((static_cast<u32>(sample.block_id) << 8) |
-										  sample.brightness[static_cast<size>(face)]) +
-									1;
-					}
+					const u32 key = sample.visible[static_cast<size>(face)]
+							? ((static_cast<u32>(sample.block_id) << 8) |
+									  sample.brightness[static_cast<size>(face)]) +
+									1
+							: 0;
 					keys[static_cast<size>(vv) * p_size + uu] = key;
 				}
 
@@ -172,33 +167,28 @@ inline auto greedy_mesh(const std::vector<MeshSample> &p_samples, i32 p_size, f3
 
 namespace impl {
 
-/// @brief Face `f` of the mesher (`+X -X +Y -Y +Z -Z`) → that cell's brightness.
-inline auto face_brightness(const cellulose::HotCellAttribute &p_attribute, i32 p_face) -> u8 {
-	switch (p_face) {
-		case 0:
-			return p_attribute.get_right_face_brightness();
-		case 1:
-			return p_attribute.get_left_face_brightness();
-		case 2:
-			return p_attribute.get_top_face_brightness();
-		case 3:
-			return p_attribute.get_bottom_face_brightness();
-		case 4:
-			return p_attribute.get_back_face_brightness();
-		default:
-			return p_attribute.get_front_face_brightness();
-	}
+/// @brief Face `p_face` brightness of a hot attribute, via the `face_brightness`
+/// customization point; flat (full) when the hot type provides no overload.
+template <typename HotType>
+auto sample_face_brightness(const HotType &p_attribute, i32 p_face) -> u8 {
+	if constexpr (requires { face_brightness(p_attribute, p_face); })
+		return static_cast<u8>(face_brightness(p_attribute, p_face));
+	else
+		return 3;
 }
 
-/// @brief Fill an `(edge + 2)^3` apron grid for `p_chunk`. Shell cells only get
-/// `solid`; interior cells also get `block_id` and the six brightnesses. Cells
-/// are read as snapshots under each chunk's hot seqlock; absent chunks are empty.
-template <typename WorldType, typename Predicate>
-auto sample_chunk(WorldType &p_world, const ChunkPosition &p_chunk, i32 p_level, Predicate &p_is_solid) -> std::vector<MeshSample> {
+/// @brief Build the `n^3` `MeshSample` grid for `p_chunk` at LOD `p_level`.
+/// A macro-cell has geometry if `p_has_geometry` holds for any of its
+/// `(1 << p_level)^3` cells (attributes from the first such cell). Face `f` is
+/// visible when the cell has geometry and `p_is_hidden(cell, neighbour)` is false
+/// (an absent-chunk neighbour is a default-constructed hot attribute).
+template <typename WorldType, typename HasGeometry, typename IsHidden>
+auto sample_chunk(WorldType &p_world, const ChunkPosition &p_chunk, i32 p_level, HasGeometry &p_has_geometry, IsHidden &p_is_hidden) -> std::vector<MeshSample> {
+	using HotType = typename WorldType::HotAttributeType;
+
 	const i32 block = 1 << p_level;
 	const i32 n = static_cast<i32>(chunk_edge_length) >> p_level;
-	const i32 stride = n + 2;
-	std::vector<MeshSample> samples(static_cast<size>(stride) * stride * stride);
+	const i32 apron = n + 2;
 
 	const i64 origin_x = static_cast<i64>(p_chunk.x) * static_cast<i64>(chunk_edge_length);
 	const i64 origin_y = static_cast<i64>(p_chunk.y) * static_cast<i64>(chunk_edge_length);
@@ -206,36 +196,57 @@ auto sample_chunk(WorldType &p_world, const ChunkPosition &p_chunk, i32 p_level,
 
 	ChunkCursor cursor(p_world);
 
+	// macro-cell attribute (nullopt when the whole block lacks geometry)
+	const auto macro = [&](i32 p_mx, i32 p_my, i32 p_mz) -> std::optional<HotType> {
+		for (i32 dx = 0; dx < block; ++dx)
+			for (i32 dy = 0; dy < block; ++dy)
+				for (i32 dz = 0; dz < block; ++dz) {
+					const WorldPosition cell{
+						origin_x + static_cast<i64>(p_mx) * block + dx,
+						origin_y + static_cast<i64>(p_my) * block + dy,
+						origin_z + static_cast<i64>(p_mz) * block + dz
+					};
+					const auto snapshot = cursor.hot(cell);
+					if (snapshot.has_value() && p_has_geometry(*snapshot))
+						return snapshot;
+				}
+		return std::nullopt;
+	};
+
+	std::vector<std::optional<HotType>> grid(static_cast<size>(apron) * apron * apron);
 	for (i32 x = -1; x <= n; ++x)
 		for (i32 y = -1; y <= n; ++y)
-			for (i32 z = -1; z <= n; ++z) {
-				MeshSample &out = samples[static_cast<size>(((x + 1) * stride + (y + 1)) * stride + (z + 1))];
-				const bool interior = x >= 0 && x < n && y >= 0 && y < n && z >= 0 && z < n;
+			for (i32 z = -1; z <= n; ++z)
+				grid[static_cast<size>(((x + 1) * apron + (y + 1)) * apron + (z + 1))] = macro(x, y, z);
 
-				// A macro-cell is solid if any of its `block^3` cells is solid;
-				// its attributes come from the first solid one found.
-				bool found_solid = false;
-				cellulose::HotCellAttribute representative{};
-				for (i32 dx = 0; dx < block && !found_solid; ++dx)
-					for (i32 dy = 0; dy < block && !found_solid; ++dy)
-						for (i32 dz = 0; dz < block && !found_solid; ++dz) {
-							const WorldPosition cell{
-								origin_x + static_cast<i64>(x) * block + dx,
-								origin_y + static_cast<i64>(y) * block + dy,
-								origin_z + static_cast<i64>(z) * block + dz
-							};
-							const auto snapshot = cursor.hot(cell);
-							if (snapshot.has_value() && p_is_solid(*snapshot)) {
-								found_solid = true;
-								representative = *snapshot;
-							}
-						}
+	const auto sampled = [&](i32 p_x, i32 p_y, i32 p_z) -> const std::optional<HotType> & {
+		return grid[static_cast<size>(((p_x + 1) * apron + (p_y + 1)) * apron + (p_z + 1))];
+	};
 
-				out.solid = found_solid;
-				if (interior && found_solid) {
-					out.block_id = representative.block_id;
-					for (i32 face = 0; face < 6; ++face)
-						out.brightness[static_cast<size>(face)] = face_brightness(representative, face);
+	static constexpr std::array<std::array<i32, 3>, 6> face_offset{
+		std::array<i32, 3>{ 1, 0, 0 }, std::array<i32, 3>{ -1, 0, 0 },
+		std::array<i32, 3>{ 0, 1, 0 }, std::array<i32, 3>{ 0, -1, 0 },
+		std::array<i32, 3>{ 0, 0, 1 }, std::array<i32, 3>{ 0, 0, -1 }
+	};
+
+	std::vector<MeshSample> samples(static_cast<size>(n) * n * n);
+	for (i32 x = 0; x < n; ++x)
+		for (i32 y = 0; y < n; ++y)
+			for (i32 z = 0; z < n; ++z) {
+				const auto &self = sampled(x, y, z);
+				if (!self.has_value())
+					continue;
+
+				MeshSample &out = samples[static_cast<size>((x * n + y) * n + z)];
+				out.block_id = self->block_id;
+				for (i32 face = 0; face < 6; ++face) {
+					out.brightness[static_cast<size>(face)] = sample_face_brightness(*self, face);
+					const auto &neighbour = sampled(
+							x + face_offset[static_cast<size>(face)][0],
+							y + face_offset[static_cast<size>(face)][1],
+							z + face_offset[static_cast<size>(face)][2]);
+					const HotType far = neighbour.has_value() ? *neighbour : HotType{};
+					out.visible[static_cast<size>(face)] = !p_is_hidden(*self, far);
 				}
 			}
 
@@ -244,24 +255,48 @@ auto sample_chunk(WorldType &p_world, const ChunkPosition &p_chunk, i32 p_level,
 
 } //namespace impl
 
-/// @brief Greedy-mesh the chunk at `p_chunk`. `p_is_solid(HotCellAttribute)`
-/// decides solidity; a face is emitted only where its neighbour (across chunk
-/// boundaries; absent chunks count as empty) is not solid. Vertices are
+/// @brief Greedy-mesh chunk `p_chunk`. `p_is_solid(HotAttribute)` decides both
+/// which cells emit geometry and which faces are hidden (a face is culled iff its
+/// neighbour is solid). Absent neighbour chunks are empty. Vertices are
 /// chunk-local, in `[0, chunk_edge_length]`.
 template <typename WorldType, typename Predicate>
 auto mesh_chunk(WorldType &p_world, const ChunkPosition &p_chunk, Predicate &&p_is_solid) -> ChunkMesh {
+	auto has_geometry = [&](const auto &p_attribute) { return p_is_solid(p_attribute); };
+	auto is_hidden = [&](const auto &, const auto &p_far) { return p_is_solid(p_far); };
 	return greedy_mesh(
-			impl::sample_chunk(p_world, p_chunk, 0, p_is_solid),
+			impl::sample_chunk(p_world, p_chunk, 0, has_geometry, is_hidden),
 			static_cast<i32>(chunk_edge_length), 1.0f);
 }
 
-/// @brief As `mesh_chunk`, but merges each `(1 << p_level)^3` block of cells into
-/// one macro-cell (solid if any cell is; attributes from the first solid cell).
+/// @brief `mesh_chunk` with the geometry and face-culling rules split — for
+/// transparency / cutout. `p_has_geometry(attr)` decides whether a cell emits
+/// faces; `p_is_hidden(near, far)` decides whether `near`'s face toward `far` is
+/// culled (e.g. water-vs-water hidden, water-vs-glass not).
+template <typename WorldType, typename HasGeometry, typename IsHidden>
+auto mesh_chunk(WorldType &p_world, const ChunkPosition &p_chunk, HasGeometry &&p_has_geometry, IsHidden &&p_is_hidden) -> ChunkMesh {
+	return greedy_mesh(
+			impl::sample_chunk(p_world, p_chunk, 0, p_has_geometry, p_is_hidden),
+			static_cast<i32>(chunk_edge_length), 1.0f);
+}
+
+/// @brief As `mesh_chunk`, merging each `(1 << p_level)^3` block into one
+/// macro-cell (has geometry if any cell does; attributes from the first).
 /// `p_level` 0–5; `0` is exactly `mesh_chunk`. Vertices still span `[0, chunk_edge_length]`.
 template <typename WorldType, typename Predicate>
 auto mesh_chunk_lod(WorldType &p_world, const ChunkPosition &p_chunk, i32 p_level, Predicate &&p_is_solid) -> ChunkMesh {
+	auto has_geometry = [&](const auto &p_attribute) { return p_is_solid(p_attribute); };
+	auto is_hidden = [&](const auto &, const auto &p_far) { return p_is_solid(p_far); };
 	return greedy_mesh(
-			impl::sample_chunk(p_world, p_chunk, p_level, p_is_solid),
+			impl::sample_chunk(p_world, p_chunk, p_level, has_geometry, is_hidden),
+			static_cast<i32>(chunk_edge_length) >> p_level,
+			static_cast<f32>(1 << p_level));
+}
+
+/// @brief `mesh_chunk_lod` with split geometry / face-culling rules.
+template <typename WorldType, typename HasGeometry, typename IsHidden>
+auto mesh_chunk_lod(WorldType &p_world, const ChunkPosition &p_chunk, i32 p_level, HasGeometry &&p_has_geometry, IsHidden &&p_is_hidden) -> ChunkMesh {
+	return greedy_mesh(
+			impl::sample_chunk(p_world, p_chunk, p_level, p_has_geometry, p_is_hidden),
 			static_cast<i32>(chunk_edge_length) >> p_level,
 			static_cast<f32>(1 << p_level));
 }

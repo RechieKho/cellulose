@@ -79,3 +79,20 @@ TEST_CASE("find_hot_attribute resolves a world position through its chunk") {
 	// A neighbouring world position in the same chunk is still default.
 	CHECK(world.find_hot_attribute(WorldPosition{ -2, 40, 5 })->block_id == 0);
 }
+
+TEST_CASE("shared storage keeps a chunk alive after it is unloaded") {
+	cellulose::World<cellulose::Chunk<>, cellulose::ChunkStorage::Shared> world;
+
+	world.chunk(ChunkPosition{ 2, 0, 0 });
+	auto handle = world.find_chunk(ChunkPosition{ 2, 0, 0 });
+	REQUIRE(static_cast<bool>(handle));
+	handle->hot_attribute(cellulose::LocalPosition{ 0, 0, 0 }).block_id = 5;
+
+	CHECK(world.remove_chunk(ChunkPosition{ 2, 0, 0 }));
+	CHECK(world.chunk_count() == 0);
+	CHECK_FALSE(static_cast<bool>(world.find_chunk(ChunkPosition{ 2, 0, 0 })));
+
+	// the handle taken earlier still points at a live chunk
+	CHECK(handle->hot_attribute(cellulose::LocalPosition{ 0, 0, 0 }).block_id == 5);
+	CHECK(handle.use_count() == 1);
+}
