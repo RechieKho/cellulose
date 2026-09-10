@@ -131,3 +131,105 @@ TEST_CASE("a +X quad is wound so its triangles face +X") {
 	}
 	FAIL("no +X triangle found");
 }
+
+// --- World-backed meshing --------------------------------------------------
+
+namespace {
+
+auto world_solid() {
+	return [](const cellulose::HotCellAttribute &p_attribute) { return p_attribute.block_id != 0; };
+}
+
+auto put(cellulose::World<> &p_world, cellulose::i64 p_x, cellulose::i64 p_y, cellulose::i64 p_z, u16 p_block_id = 1) -> void {
+	const cellulose::WorldPosition cell{ p_x, p_y, p_z };
+	p_world.chunk(cellulose::to_chunk_position(cell))
+			.hot_attribute(cellulose::to_local_position(cell))
+			.block_id = p_block_id;
+}
+
+auto has_vertex_at(const cellulose::ChunkMesh &p_mesh, const cellulose::Vec3 &p_position) -> bool {
+	for (const auto &vertex : p_mesh.vertices)
+		if (vertex.position == p_position)
+			return true;
+	return false;
+}
+
+} //namespace
+
+TEST_CASE("mesh_chunk on an empty chunk produces nothing") {
+	cellulose::World<> world;
+	world.chunk({ 0, 0, 0 });
+	CHECK(cellulose::mesh_chunk(world, { 0, 0, 0 }, world_solid()).empty());
+}
+
+TEST_CASE("mesh_chunk meshes a lone cell at its world-local position") {
+	cellulose::World<> world;
+	put(world, 5, 5, 5);
+
+	const auto mesh = cellulose::mesh_chunk(world, { 0, 0, 0 }, world_solid());
+	CHECK(mesh.vertices.size() == 24);
+	for (const auto &vertex : mesh.vertices) {
+		CHECK(vertex.position.x >= 5.0f);
+		CHECK(vertex.position.x <= 6.0f);
+	}
+}
+
+TEST_CASE("a fully solid chunk meshes to its six-quad shell") {
+	cellulose::World<> world;
+	for (cellulose::i64 x = 0; x < 32; ++x)
+		for (cellulose::i64 y = 0; y < 32; ++y)
+			for (cellulose::i64 z = 0; z < 32; ++z)
+				put(world, x, y, z);
+
+	const auto mesh = cellulose::mesh_chunk(world, { 0, 0, 0 }, world_solid());
+	CHECK(mesh.vertices.size() == 24);
+	CHECK(has_vertex_at(mesh, cellulose::Vec3{ 32, 32, 32 }));
+}
+
+TEST_CASE("mesh_chunk culls a face against a solid in the neighbouring chunk") {
+	cellulose::World<> world;
+	put(world, 31, 0, 0);
+	put(world, 32, 0, 0); // chunk (1,0,0)
+
+	const auto mesh = cellulose::mesh_chunk(world, { 0, 0, 0 }, world_solid());
+	CHECK(quads_facing(mesh, cellulose::Vec3{ 1, 0, 0 }) == 0);
+}
+
+TEST_CASE("mesh_chunk keeps a boundary face when the neighbour chunk is absent") {
+	cellulose::World<> world;
+	put(world, 31, 0, 0);
+
+	const auto mesh = cellulose::mesh_chunk(world, { 0, 0, 0 }, world_solid());
+	CHECK(quads_facing(mesh, cellulose::Vec3{ 1, 0, 0 }) == 1);
+}
+
+TEST_CASE("mesh_chunk_lod level 0 equals mesh_chunk") {
+	cellulose::World<> world;
+	put(world, 2, 2, 2);
+	put(world, 3, 2, 2);
+	put(world, 10, 5, 7);
+
+	CHECK(cellulose::mesh_chunk_lod(world, { 0, 0, 0 }, 0, world_solid()).vertices.size() ==
+			cellulose::mesh_chunk(world, { 0, 0, 0 }, world_solid()).vertices.size());
+}
+
+TEST_CASE("mesh_chunk_lod collapses a full chunk to one shell at the coarsest level") {
+	cellulose::World<> world;
+	for (cellulose::i64 x = 0; x < 32; ++x)
+		for (cellulose::i64 y = 0; y < 32; ++y)
+			for (cellulose::i64 z = 0; z < 32; ++z)
+				put(world, x, y, z);
+
+	const auto mesh = cellulose::mesh_chunk_lod(world, { 0, 0, 0 }, 5, world_solid());
+	CHECK(mesh.vertices.size() == 24);
+	CHECK(has_vertex_at(mesh, cellulose::Vec3{ 32, 32, 32 }));
+}
+
+TEST_CASE("mesh_chunk_lod grows a lone cell into its macro-block") {
+	cellulose::World<> world;
+	put(world, 0, 0, 0);
+
+	const auto mesh = cellulose::mesh_chunk_lod(world, { 0, 0, 0 }, 1, world_solid());
+	CHECK(mesh.vertices.size() == 24);
+	CHECK(has_vertex_at(mesh, cellulose::Vec3{ 2, 2, 2 }));
+}
