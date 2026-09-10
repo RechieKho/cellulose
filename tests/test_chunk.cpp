@@ -2,6 +2,12 @@
 
 #include <cellulose/chunk.hpp>
 
+#include <atomic>
+#include <chrono>
+#include <thread>
+
+static_assert(alignof(cellulose::Chunk<>) >= cellulose::cache_line_size);
+
 TEST_CASE("chunk edge length and cell count are consistent") {
 	CHECK(cellulose::chunk_cell_count == cellulose::chunk_edge_length * cellulose::chunk_edge_length * cellulose::chunk_edge_length);
 	CHECK(cellulose::chunk_cell_count == 32768u);
@@ -51,4 +57,71 @@ TEST_CASE("chunk exposes its packed and sparse collections") {
 	chunk.packed().get<cellulose::u16>()[3] = 7;
 	CHECK(chunk.packed().get<cellulose::u16>()[3] == 7);
 	CHECK(chunk.sparse().get<std::array<cellulose::u8, 16>>().empty());
+}
+
+TEST_CASE("functor accessors round-trip each tier under its lock") {
+	cellulose::Chunk<
+			cellulose::PackedCellAttributeCollection<cellulose::chunk_cell_count, cellulose::u16>,
+			cellulose::SparseCellAttributeCollection<std::array<cellulose::u8, 16>>>
+			chunk;
+
+	const auto index = cellulose::encode_cell_index(cellulose::LocalPosition{ 4, 5, 6 });
+
+	chunk.write_hot([&](auto &hot) { hot[index].block_id = 12; });
+	const auto block_id = chunk.read_hot([&](const auto &hot) { return hot[index].block_id; });
+	CHECK(block_id == 12);
+
+	chunk.write_cold([&](auto &packed) { packed.template get<cellulose::u16>()[index] = 9; });
+	const auto cold = chunk.read_cold([&](const auto &packed) {
+		return packed.template get<cellulose::u16>()[index];
+	});
+	CHECK(cold == 9);
+
+	chunk.write_sparse([&](auto &sparse) {
+		sparse.template get<std::array<cellulose::u8, 16>>()[index] = std::array<cellulose::u8, 16>{};
+	});
+	const auto present = chunk.read_sparse([&](const auto &sparse) {
+		return sparse.template get<std::array<cellulose::u8, 16>>().contains(index);
+	});
+	CHECK(present);
+}
+
+// The writer keeps block_id == state; a torn read (seen without the seqlock)
+// would pair fields from two different writes.
+TEST_CASE("concurrent write_hot / read_hot never yields a torn HotCellAttribute") {
+	cellulose::Chunk<> chunk;
+	const auto index = cellulose::encode_cell_index(cellulose::LocalPosition{ 10, 20, 30 });
+
+	std::atomic<bool> stop{ false };
+	std::atomic<cellulose::u64> tears{ 0 };
+
+	std::thread writer([&] {
+		cellulose::u16 v = 1;
+		while (!stop.load(std::memory_order_acquire)) {
+			chunk.write_hot([&](auto &hot) {
+				hot[index].block_id = v;
+				hot[index].state = v;
+			});
+			if (++v == 0)
+				v = 1;
+		}
+	});
+
+	const auto run_reader = [&] {
+		while (!stop.load(std::memory_order_acquire)) {
+			const auto cell = chunk.read_hot([&](const auto &hot) { return hot[index]; });
+			if (cell.block_id != cell.state)
+				++tears;
+		}
+	};
+	std::thread reader_a(run_reader);
+	std::thread reader_b(run_reader);
+
+	std::this_thread::sleep_for(std::chrono::milliseconds(150));
+	stop.store(true, std::memory_order_release);
+	writer.join();
+	reader_a.join();
+	reader_b.join();
+
+	CHECK(tears.load() == 0);
 }

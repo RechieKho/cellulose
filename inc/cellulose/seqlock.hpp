@@ -50,6 +50,10 @@ public:
 	template <typename ReadFn>
 	auto read(ReadFn &&p_read) const -> std::invoke_result_t<ReadFn &> {
 		using Result = std::invoke_result_t<ReadFn &>;
+		static_assert(
+				!std::is_reference_v<Result>,
+				"a seqlock read functor must return a snapshot by value (or void), "
+				"never a reference into the protected data.");
 
 		while (true) {
 			u64 before = m_sequence.load(std::memory_order_acquire);
