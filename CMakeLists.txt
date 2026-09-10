@@ -29,6 +29,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 find_package(raylib QUIET)
+find_package(Threads REQUIRED)
 
 if(NOT TARGET raylib AND NOT raylib_FOUND)
 include(FetchContent)
@@ -82,6 +83,7 @@ target_link_libraries(${LIBRARY_NAME}
     libmorton
     unordered_dense
     fmt
+    Threads::Threads
 )
 
 add_executable(${EXECUTABLE_NAME} ${SOURCE_FILES})

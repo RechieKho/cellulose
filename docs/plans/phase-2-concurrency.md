@@ -67,9 +67,15 @@ After Phase 1 the data structures are correct but single-threaded:
   unchanged; bare accessors keep their current signatures.
 - **C++20**, `std::atomic` / `std::shared_mutex` / `std::mutex` only — no
   platform intrinsics, no third-party concurrency lib.
-- TDD per task: RED (failing test / TSan finding) → GREEN → commit.
-- Threaded tests run under **ThreadSanitizer** in at least one CI/local config
-  (`-fsanitize=thread`); add a `CELLULOSE_SANITIZER` cache option.
+- TDD per task: RED (failing test / race repro) → GREEN → commit.
+- Threaded tests must fail *without* the synchronisation and pass *with* it under
+  a high iteration budget (≥ 1e6) plus `std::this_thread::yield()` injection —
+  this is the portable signal, and it runs on the dev machine (Windows/clang).
+- `CELLULOSE_SANITIZER` cache option passes the sanitizer flag through to
+  `cellulose_tests` (`/fsanitize=` on MSVC, `-fsanitize=` elsewhere). The dev
+  machine's default toolchain is **MSVC cl.exe** (VS generator), which supports
+  only `address`. **ThreadSanitizer is Linux/macOS + GCC/Clang only** — run
+  `-DCELLULOSE_SANITIZER=thread` in Linux CI or a Linux checkout.
 
 ---
 
@@ -257,9 +263,11 @@ After Phase 1 the data structures are correct but single-threaded:
    — warning-free for `inc/cellulose/*`; `cellulose`, `cellulose_tests` link.
 2. **Plain suite:** `ctest --test-dir build --output-on-failure` — all Phase 1 +
    Phase 2 cases pass; Phase 1 cases unchanged.
-3. **TSan suite:** `cmake -S . -B build-tsan -DCELLULOSE_SANITIZER=thread &&
-   cmake --build build-tsan && ctest --test-dir build-tsan` — **zero** ThreadSanitizer
-   reports; the threaded stress tests run their full iteration budget.
+3. **Stress suite (portable):** the threaded tests run their full iteration
+   budget (≥ 1e6) and pass; a temporary revert of the lock/`atomic` in any one
+   primitive makes its stress test fail (assertion or crash). **TSan (Linux):**
+   on a Linux checkout, `cmake -B build-tsan -DCELLULOSE_SANITIZER=thread &&
+   cmake --build build-tsan && ctest --test-dir build-tsan` — zero reports.
 4. **Pointer stability:** the 10 000-insert test holds a live `Chunk*` and a
    `HotCellAttribute*` across inserts *and* one unrelated `remove_chunk`.
 5. **No API regression:** `git stash` the Phase 2 diff to `tests/` and confirm the
