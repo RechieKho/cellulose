@@ -20,11 +20,13 @@ struct Config final {
 	int chunks = 256;
 
 	bool csv = false;
+	bool single = false; //!< run one config from the flags above, not the default sweep
 	bool wide_window = false; //!< widen the seqlock torn-read window with a yield
 };
 
 // One entry point per benchmark file. `main.cpp` maps CLI names to these.
 auto run_noop(const Config &p_config) -> void; // harness self-test
+auto run_seqlock(const Config &p_config) -> void; // B1, B2
 
 } //namespace cellbench
 

@@ -191,6 +191,10 @@ public:
 		return m_revision->load(std::memory_order_acquire);
 	}
 
+	/// @brief Hot-tier seqlock retries so far — a benchmark instrument. Always 0
+	/// unless built with `-DCELLULOSE_SEQLOCK_STATS=ON`.
+	auto hot_retry_count() const -> u64 { return m_hot_lock->sequence.retries(); }
+
 	// --- Unsynchronised accessors -----------------------------------------
 	// Single-threaded use, or the caller already holds the matching tier lock.
 

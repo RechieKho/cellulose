@@ -14,6 +14,7 @@ using ScenarioFn = void (*)(const Config &);
 
 const std::map<std::string, ScenarioFn> registry{
 	{ "noop", cellbench::run_noop },
+	{ "seqlock", cellbench::run_seqlock },
 };
 
 auto require_release() -> void {
@@ -38,8 +39,9 @@ auto usage() -> void {
 			"  --runs N             runs per config (default 5; scenarios report the median)\n"
 			"  --readers/--writers/--queriers/--meshers/--editors/--streamers N\n"
 			"  --chunks N           working-set size where a scenario uses one\n"
+			"  --single             run one config from the flags, not the default sweep\n"
 			"  --wide-window        widen the seqlock torn-read window\n"
-			"  --csv                machine-readable output\n");
+			"  --csv                machine-readable output (scenarios print their own header)\n");
 }
 
 } //namespace
@@ -84,6 +86,8 @@ auto main(int p_argc, char **p_argv) -> int {
 			config.chunks = std::atoi(value(i));
 		else if (argument == "--wide-window")
 			config.wide_window = true;
+		else if (argument == "--single")
+			config.single = true;
 		else if (argument == "--csv")
 			config.csv = true;
 		else if (argument == "--help" || argument == "-h") {
@@ -94,9 +98,6 @@ auto main(int p_argc, char **p_argv) -> int {
 			return 2;
 		}
 	}
-
-	if (config.csv)
-		fmt::print("scenario,role,threads,ops,ops_per_sec,p50_ns,p99_ns,max_ns\n");
 
 	if (scenario == "all") {
 		for (const auto &[name, function] : registry)
