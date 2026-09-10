@@ -1,7 +1,7 @@
 #include "harness.hpp"
 #include "scenarios.hpp"
 
-#include <fmt/core.h>
+#include <fmt/format.h>
 #include <cstdlib>
 #include <map>
 #include <string>

@@ -4,7 +4,7 @@
 #include <cellulose/coordinate.hpp>
 #include <cellulose/world.hpp>
 
-#include <fmt/core.h>
+#include <fmt/format.h>
 #include <atomic>
 #include <cstdint>
 #include <string_view>

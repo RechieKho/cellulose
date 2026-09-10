@@ -7,7 +7,7 @@
 #include <cellulose/raycast.hpp>
 #include <cellulose/world.hpp>
 
-#include <fmt/core.h>
+#include <fmt/format.h>
 #include <array>
 #include <atomic>
 #include <tuple>

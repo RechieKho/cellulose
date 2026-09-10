@@ -5,7 +5,7 @@
 #include <cellulose/coordinate.hpp>
 #include <cellulose/morton.hpp>
 
-#include <fmt/core.h>
+#include <fmt/format.h>
 #include <atomic>
 #include <thread>
 #include <utility>

@@ -7,7 +7,7 @@
 // coarse (power-of-two bucketed) latency histogram for roles that opt in to
 // timing their operation.
 
-#include <fmt/core.h>
+#include <fmt/format.h>
 #include <array>
 #include <atomic>
 #include <bit>
