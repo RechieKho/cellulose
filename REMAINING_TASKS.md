@@ -5,8 +5,8 @@ intent and locked decisions for each are in `ARCHITECTURE_SPEC.md` (§1–§4), 
 per-phase plans under `docs/plans/`.
 
 **All four phases are implemented and tested**, `main` is pushed to `origin`, and
-every backlog item with an "adopt" / "yes" verdict is done (D1, D2, D3, D5, D8,
-D9, texture management, the `ChunkCursor` + `snapshot_hot` query speed-ups).
+every backlog item with an "adopt" / "yes" verdict is done (D1, D2, D3, D5, D6,
+D8, D9, texture management, the `ChunkCursor` + `snapshot_hot` query speed-ups).
 
 **What is left is deferred by decision, not unstarted work** — each needs a
 concrete trigger before it is worth doing (see the "Cross-cutting / backlog"
@@ -18,10 +18,9 @@ section and `docs/plans/design-followups.md`):
   Trigger: streaming engines adopting `Shared` widely (B5: ~25% lookup cost).
 - **D10** — `sweep_aabb` (continuous collision) + sphere / capsule casts. Trigger:
   a use for fast movers or shape casts.
-- **D6** — ambient occlusion. Consumer's concern; if ever built into the mesher it
-  is an opt-in flag with AO in the merge key, never default.
 - **Optional meshing modules** — `ChunkMeshCache`, LOD seam stitching, worker-pool
-  meshing. Each self-contained; build on demand.
+  meshing, a "casts AO" predicate distinct from `has_geometry`. Each
+  self-contained; build on demand.
 - **Won't do** — D7 non-cube block shapes, bitwise / SIMD greedy meshing (both
   recorded below with rationale).
 
@@ -215,8 +214,13 @@ Design decisions D1–D10 (from the design review) and their triggers are in
 - [ ] **Continuous collision / shape casts (D10) — decided, deferred.** Keep
       `move_aabb`. Add `sweep_aabb` (Minkowski time-of-impact, no resolution) and
       sphere/capsule casts **on demand**.
-- [ ] **Ambient occlusion (D6) — decided.** Consumer's concern; if built into the
-      mesher it is an opt-in flag with AO in the merge key, never default.
+- [x] **Ambient occlusion (D6) — done.** Opt-in
+      `mesh_chunk(..., MeshOptions{ .ambient_occlusion = true })`: 0fps corner AO
+      from the 8 in-plane neighbours, folded into the greedy merge key so
+      uniform-AO runs still merge and any per-corner variation emits a 1×1 quad;
+      anisotropic quads flip their triangulation. `MeshVertex::occlusion`
+      (`1.0` when off, byte-identical geometry). Level-0 meshes only; a distinct
+      "casts AO" predicate (vs `has_geometry`) is a later refinement.
 - [x] **Non-cube block shapes (D7) — won't do.** Greedy meshing is a cube
       optimisation; a block-model system belongs in the consumer's engine.
 - [x] **Bitwise / SIMD greedy meshing — won't do.** The binary-greedy-meshing

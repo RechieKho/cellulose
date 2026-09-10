@@ -30,11 +30,12 @@ superpowers plugin were removed / disabled — don't look for them.
 - **All four README subsystems are implemented and tested**: core data structure
   (Phase 1), chunk-level concurrency (Phase 2), spatial querying (Phase 3),
   greedy meshing + LOD (Phase 4). Plus the design follow-ups (extensible hot
-  type, `Chunk::revision`, mesher rule split, opt-in `shared_ptr` chunk storage)
-  and texture management (per-face `TextureID` on `BlockRegistry`, `texture_id`
-  in the merge key, `TextureAtlas` / `atlas_builder`, raylib atlas-tiling bridge
-  — `docs/plans/texture-management.md`).
-- **84 tests, all green.** `main` == `origin/main`.
+  type, `Chunk::revision`, mesher rule split, opt-in `shared_ptr` chunk storage,
+  strict atomics + sharded directory from the benchmarks, opt-in ambient
+  occlusion) and texture management (per-face `TextureID` on `BlockRegistry`,
+  `texture_id` in the merge key, `TextureAtlas` / `atlas_builder`, raylib
+  atlas-tiling bridge — `docs/plans/texture-management.md`).
+- **88 tests, all green.** `main` == `origin/main`.
 - Headers (`inc/cellulose/`): `types coordinate morton cell block texture
   atlas_builder inspect sync seqlock rwlock chunk world cursor vector raycast
   volume collision mesh` + `cellulose.hpp` (umbrella) + `raylib.hpp` (opt-in,
@@ -57,9 +58,9 @@ ctest --test-dir build       # <3 s; 84 cases
   `build/<Config>/cellulose.exe` (multi-config generator → `Debug/` subdir). The
   demo (`src/main.cpp`) is a **minimal voxel game** — fly camera, hold-LMB to
   mine, RMB place, per-face **textures** via a procedural atlas + the atlas-tiling
-  shader, and a **custom cold-tier attribute** (`struct Damage`) via
-  `Chunk<HotCellAttribute, PackedChunkAttributes<Damage>>` +
-  `read_cold` / `write_cold` — gated behind `CELLULOSE_BUILD_DEMO` (ON by default).
+  shader, baked **ambient occlusion** (`MeshOptions`), and a **custom cold-tier
+  attribute** (`struct Damage`) via `Chunk<HotCellAttribute, PackedChunkAttributes<Damage>>`
+  + `read_cold` / `write_cold` — gated behind `CELLULOSE_BUILD_DEMO` (ON by default).
 - **The demo opens a raylib window and blocks.** To smoke-check in a script:
   run detached, `sleep 5`, then `taskkill //F //IM cellulose.exe`. Expect
   `world: 9 chunks generated` on stdout, two custom shaders compiled, 9 meshes
@@ -192,6 +193,14 @@ stricter. Two classes of thing that bit here and will bite again:
     visitor that calls back into `world.chunk()` deadlocks (same hazard as the
     old single mutex). `sample_chunk` reads the centre chunk via one
     `Chunk::snapshot_hot` and the apron via `ChunkCursor` — two paths on purpose.
+
+16. **AO is `MeshOptions{ .ambient_occlusion = true }`** (trailing arg on every
+    `mesh_chunk` / `mesh_chunk_lod`). Adding it forced positive concept
+    constraints — `impl::FaceHiddenRule` on the `(has_geometry, is_hidden)`
+    overloads and `impl::FaceTextureResolver` on the both-rules-plus-texture ones
+    — so `MeshOptions` in the 4th/5th slot isn't mistaken for an `is_hidden` or a
+    resolver. Don't remove those constraints. AO off ⇒ `MeshVertex::occlusion == 1`
+    and byte-identical geometry; level-0 only; occluder test is `has_geometry`.
 
 ---
 

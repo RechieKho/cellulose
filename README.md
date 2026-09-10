@@ -65,9 +65,10 @@ const auto registry = cellulose::BlockRegistryBuilder()
     .add_block_builder(cellulose::BlockBuilder("dirt").texture_all(3))
     .build();
 
-// `registry` is itself the resolver — pass it to the mesher
-cellulose::ChunkMesh mesh = cellulose::mesh_chunk(world, { 0, 0, 0 }, solid, registry);
-// each vertex now carries `texture_id`; every quad is one tile
+// `registry` is itself the resolver — pass it to the mesher; MeshOptions is optional
+cellulose::ChunkMesh mesh = cellulose::mesh_chunk(
+    world, { 0, 0, 0 }, solid, registry, { .ambient_occlusion = true });
+// each vertex now carries `texture_id` and `occlusion`
 
 // build a texture sheet: strip() gives a 1xN grid atlas + the pixel size to blit
 const std::array<cellulose::TextureID, 3> ids{ 1, 2, 3 };
@@ -164,6 +165,8 @@ To prevent cache invalidation when adjacent memory locations are modified by dif
 The rendering pipeline generates optimized mesh geometry from spatial data using **greedy meshing**. To extend effective render distance efficiently, it constructs multiple **Levels of Detail (LOD)** by downsampling voxel clusters into macro-blocks.
 
 **Texturing** is consumer-driven: blocks carry a texture id per face (`BlockRegistry`), the mesher folds the resolved id into the merge key and onto every vertex, and a renderer-neutral atlas layout (`TextureAtlas` / `atlas_builder`) maps ids to sheet rects. The opt-in raylib bridge draws it from a single 2‑D atlas with an `origin + fract(uv) * tileSize` tiling shader — no texture-array feature, no platform-specific GL.
+
+**Ambient occlusion** is an opt-in mesher flag (`MeshOptions{ .ambient_occlusion = true }`): 0fps-style per-corner AO, folded into the greedy merge key so open surfaces still merge and only faces touching an edge or crevice split into their own quads. Each `MeshVertex` carries an `occlusion` factor (`1.0` when the flag is off — geometry is then byte-identical).
 
 ## Implementation Status
 

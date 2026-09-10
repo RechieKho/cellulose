@@ -308,6 +308,89 @@ TEST_CASE("mesh_chunk with explicit rules keeps a face between unlike transparen
 	CHECK(quads_facing(mesh, cellulose::Vec3{ -1, 0, 0 }) == 2);
 }
 
+// --- ambient occlusion (MeshOptions::ambient_occlusion) ---------------------
+
+namespace {
+
+auto min_occlusion(const cellulose::ChunkMesh &p_mesh, const cellulose::Vec3 &p_normal) -> float {
+	float lowest = 1.0f;
+	for (const auto &vertex : p_mesh.vertices)
+		if (vertex.normal == p_normal)
+			lowest = std::min(lowest, vertex.occlusion);
+	return lowest;
+}
+
+} //namespace
+
+TEST_CASE("without MeshOptions every vertex is fully unoccluded") {
+	cellulose::World<> world;
+	for (cellulose::i64 x = 2; x <= 5; ++x)
+		for (cellulose::i64 z = 2; z <= 5; ++z)
+			put(world, x, 5, z);
+
+	const auto mesh = cellulose::mesh_chunk(world, { 0, 0, 0 }, world_solid());
+	for (const auto &vertex : mesh.vertices)
+		CHECK(vertex.occlusion == doctest::Approx(1.0f));
+}
+
+TEST_CASE("AO on a flat slab still merges and stays unoccluded") {
+	cellulose::World<> world;
+	for (cellulose::i64 x = 2; x <= 6; ++x)
+		for (cellulose::i64 z = 2; z <= 6; ++z)
+			put(world, x, 5, z);
+
+	const auto mesh = cellulose::mesh_chunk(
+			world, { 0, 0, 0 }, world_solid(), cellulose::MeshOptions{ true });
+
+	CHECK(quads_facing(mesh, cellulose::Vec3{ 0, 1, 0 }) == 1); // top still one quad
+	CHECK(min_occlusion(mesh, cellulose::Vec3{ 0, 1, 0 }) == doctest::Approx(1.0f));
+}
+
+TEST_CASE("a block on the slab darkens and splits the top faces around it") {
+	cellulose::World<> world;
+	for (cellulose::i64 x = 0; x <= 8; ++x)
+		for (cellulose::i64 z = 0; z <= 8; ++z)
+			put(world, x, 5, z);
+	put(world, 4, 6, 4); // a lump sitting on the slab
+
+	const auto plain = cellulose::mesh_chunk(world, { 0, 0, 0 }, world_solid());
+	const auto ao = cellulose::mesh_chunk(
+			world, { 0, 0, 0 }, world_solid(), cellulose::MeshOptions{ true });
+
+	// plain meshing merges the whole top (minus the covered cell) efficiently;
+	// AO forces the occluded ring of cells around the lump into their own quads
+	CHECK(quads_facing(ao, cellulose::Vec3{ 0, 1, 0 }) > quads_facing(plain, cellulose::Vec3{ 0, 1, 0 }));
+	CHECK(min_occlusion(ao, cellulose::Vec3{ 0, 1, 0 }) < 1.0f);
+	// a corner far from the lump is untouched
+	bool far_corner_lit = false;
+	for (const auto &vertex : ao.vertices)
+		if (vertex.normal == cellulose::Vec3{ 0, 1, 0 } && vertex.position.x <= 0.5f && vertex.position.z <= 0.5f)
+			far_corner_lit = vertex.occlusion == doctest::Approx(1.0f);
+	CHECK(far_corner_lit);
+}
+
+TEST_CASE("greedy_mesh splits a run where one cell's face AO is non-uniform") {
+	std::vector<cellulose::MeshSample> samples(8 * 8 * 8);
+	const auto index = [](cellulose::i32 x, cellulose::i32 y, cellulose::i32 z) {
+		return static_cast<std::size_t>((x * 8 + y) * 8 + z);
+	};
+	for (cellulose::i32 x = 1; x <= 3; ++x) {
+		auto &s = samples[index(x, 1, 1)];
+		s.block_id = 1;
+		s.visible[2] = true; // +Y
+		s.brightness[2] = 3;
+		s.face_occlusion[2] = 0xFF; // uniform (all corners 3)
+	}
+	samples[index(2, 1, 1)].face_occlusion[2] = 0b11'11'10'11; // one corner down a level
+
+	const auto with_ao = cellulose::greedy_mesh(samples, 8, 1.0f, /*ambient_occlusion=*/true);
+	const auto without = cellulose::greedy_mesh(samples, 8, 1.0f, /*ambient_occlusion=*/false);
+
+	CHECK(quads_facing(without, cellulose::Vec3{ 0, 1, 0 }) == 1); // merged run of 3
+	CHECK(quads_facing(with_ao, cellulose::Vec3{ 0, 1, 0 }) == 3); // middle cell breaks the run
+	CHECK(min_occlusion(with_ao, cellulose::Vec3{ 0, 1, 0 }) < 1.0f);
+}
+
 // --- texture ids ------------------------------------------------------------
 
 TEST_CASE("without a resolver every vertex's texture_id is its block_id") {

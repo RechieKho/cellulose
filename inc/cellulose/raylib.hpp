@@ -83,10 +83,12 @@ inline auto to_raylib_mesh(const ChunkMesh &p_mesh, ColorFn &&p_color_of) -> Mes
 	return mesh;
 }
 
-/// @brief `to_raylib_mesh` with a default grayscale-by-face-brightness colour.
+/// @brief `to_raylib_mesh` with a default grayscale colour from face brightness
+/// × ambient occlusion (`occlusion` is `1` unless the mesh was built with
+/// `MeshOptions::ambient_occlusion`).
 inline auto to_raylib_mesh(const ChunkMesh &p_mesh) -> Mesh {
 	return to_raylib_mesh(p_mesh, [](const MeshVertex &p_vertex) {
-		const auto shade = static_cast<unsigned char>(40.0f + 215.0f * p_vertex.brightness);
+		const auto shade = static_cast<unsigned char>((40.0f + 215.0f * p_vertex.brightness) * p_vertex.occlusion);
 		return Color{ shade, shade, shade, 255 };
 	});
 }
@@ -139,7 +141,8 @@ inline auto to_raylib_mesh(const ChunkMesh &p_mesh, const TextureAtlas &p_atlas)
 	Mesh mesh = impl::fill_raylib_mesh(
 			p_mesh,
 			[](const MeshVertex &p_vertex) {
-				const auto shade = static_cast<unsigned char>((0.45f + 0.55f * p_vertex.brightness) * 255.0f);
+				const auto shade = static_cast<unsigned char>(
+						(0.45f + 0.55f * p_vertex.brightness) * p_vertex.occlusion * 255.0f);
 				return Color{ shade, shade, shade, 255 };
 			},
 			&p_atlas);

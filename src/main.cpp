@@ -4,7 +4,8 @@
 //   * a `cellulose::BlockRegistry` mapping block ids to per-face textures,
 //   * a custom cold-tier cell attribute (`Damage`) for mining progress,
 //   * `cellulose::raycast` to find the block under the crosshair,
-//   * `cellulose::mesh_chunk` to (re)build each chunk's render mesh after an edit,
+//   * `cellulose::mesh_chunk` (with baked ambient occlusion) to (re)build each
+//     chunk's render mesh after an edit,
 //   * `cellulose::to_raylib_mesh` + the atlas-tiling shader to draw it.
 // Everything else here is raylib windowing / camera / draw calls.
 
@@ -178,7 +179,8 @@ auto main() -> int {
 			has_mesh[ux][uz] = false;
 		}
 		const cellulose::ChunkMesh chunk_mesh = cellulose::mesh_chunk(
-				world, cellulose::ChunkPosition{ p_cx, 0, p_cz }, is_solid, registry);
+				world, cellulose::ChunkPosition{ p_cx, 0, p_cz }, is_solid, registry,
+				cellulose::MeshOptions{ .ambient_occlusion = true });
 		if (!chunk_mesh.empty()) {
 			meshes[ux][uz] = cellulose::to_raylib_mesh(chunk_mesh, atlas);
 			has_mesh[ux][uz] = true;

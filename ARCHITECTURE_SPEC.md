@@ -284,9 +284,9 @@ Renderer-neutral triangle geometry from chunk voxel data (`mesh.hpp`). No raylib
 in the core. `cellulose/raylib.hpp` is an **opt-in** bridge (not in the umbrella;
 include it with raylib linked): `to_raylib_mesh(ChunkMesh, color_fn) -> Mesh`.
 
-**Output types:** `MeshVertex{ Vec3 position; Vec3 normal; f32 u, v; f32 brightness; u32 block_id; TextureID texture_id; }`
+**Output types:** `MeshVertex{ Vec3 position; Vec3 normal; f32 u, v; f32 brightness; u32 block_id; TextureID texture_id; f32 occlusion; }`
 (positions chunk-local in `[0, chunk_edge_length]`; `u`/`v` are tile-space, `[0, w]×[0, h]`;
-`texture_id` is the render key — see §4.1);
+`texture_id` is the render key — see §4.1; `occlusion` is `1.0` unless AO is enabled — see §4.2);
 `ChunkMesh{ vertices, indices }` (index triples, CCW-front).
 
 | Function (`namespace cellulose`) | Behaviour |
@@ -295,6 +295,7 @@ include it with raylib linked): `to_raylib_mesh(ChunkMesh, color_fn) -> Mesh`.
 | `mesh_chunk(world, cp, is_solid) -> ChunkMesh` | Opaque-cube convenience — `has_geometry = is_solid`, `is_hidden(near, far) = is_solid(far)`. |
 | `mesh_chunk(world, cp, has_geometry, is_hidden) -> ChunkMesh` | General form: `has_geometry(attr)` decides whether a cell emits faces, `is_hidden(near, far)` decides face culling — for transparency / cutout (e.g. water-vs-water hidden, water-vs-glass not). |
 | `mesh_chunk_lod(world, cp, level, …)` | `level` 0–5 (3-arg and 4-arg rule forms): merges each `(1 << level)³` block into one macro-cell (geometry if any cell has it, attributes from the first) then greedy-meshes the `32 >> level` grid with `block_scale = 1 << level`. `level 0` ≡ `mesh_chunk`. |
+| trailing `MeshOptions{ .ambient_occlusion = true }` on any form | opt-in baked AO (§4.2). Every overload takes it as a defaulted last arg; the `(has_geometry, is_hidden)` forms are disambiguated from `(is_solid, texture_of)` by `impl::FaceHiddenRule` / `impl::FaceTextureResolver`. |
 
 `impl::sample_chunk` builds the `n³` grid from one `Chunk::snapshot_hot` of the
 centre chunk plus `impl::ChunkCursor` per-cell reads for the 1-cell apron (an
@@ -303,12 +304,31 @@ absent neighbour chunk is a default-constructed hot attribute), computing each
 so the culling decision lives where the attributes are, and `greedy_mesh` never
 looks at neighbours.
 
-**Merge key** = `(that-face's texture id, that-face's brightness)` — the texture
-id (`§4.1`), **not** `block_id`, so two blocks that share a face texture merge
-and one block whose faces differ does not. Brightness from the `face_brightness`
-CPO (flat for a hot type without it). Cubes only — `HotCellAttribute` pitch/yaw
-orientation bits are unused. `block_id` on the emitted vertices is the merged
-run's origin cell.
+**Merge key** = `(that-face's texture id, that-face's brightness [, uniform AO
+level])` — the texture id (`§4.1`), **not** `block_id`, so two blocks that share a
+face texture merge and one block whose faces differ does not. Brightness from the
+`face_brightness` CPO (flat for a hot type without it). Cubes only —
+`HotCellAttribute` pitch/yaw orientation bits are unused. `block_id` on the
+emitted vertices is the merged run's origin cell.
+
+### 4.2 Ambient occlusion (opt-in — `MeshOptions::ambient_occlusion`)
+
+Off by default; every vertex's `occlusion` is then `1.0` and geometry is
+byte-identical to a build without the option. When on (level-0 meshes only):
+
+- `impl::sample_chunk` computes each visible face corner's AO from its 3 in-plane
+  neighbours in the `+normal` layer — `(s1 && s2) ? 0 : 3 - (s1 + s2 + sc)`,
+  0fps-style — and packs the 4 levels (2 bits each) into `MeshSample::face_occlusion`.
+- `greedy_mesh` folds the AO into the merge key when the 4 corners are equal, so a
+  uniformly-lit or uniformly-shadowed run still merges; a face with any per-corner
+  variation is emitted immediately as a 1×1 quad and never merges ("accept fewer
+  merges" — the D6 decision).
+- `impl::emit_quad` writes `MeshVertex::occlusion = level / 3` and flips the quad's
+  triangulation when the AO is anisotropic (`ao[0]+ao[2] > ao[1]+ao[3]`).
+
+An occluder test is `has_geometry` (a cell that emits geometry occludes); a
+separate "does this cell cast AO" predicate is a future refinement. The built-in
+`to_raylib_mesh` colour helpers multiply `occlusion` into the vertex shade.
 
 ### 4.1 Texture management
 
@@ -345,11 +365,10 @@ The apron sampler (and `raycast` / `move_aabb`) walk cells through
 `impl::ChunkCursor` (`cursor.hpp`), which caches the current chunk pointer so a
 run of same-chunk cells costs one `find_chunk` / directory-lock, not one per cell.
 
-**Deferred:** ambient occlusion; non-cube block shapes (orientation bits);
-transparent / cutout pass; incremental remesh + per-chunk mesh cache; LOD seam
-stitching; non-uniform-tile atlas support in the shipped shader; threaded meshing
-(the mesher already only needs seqlock read access); a bulk per-chunk `read_hot`
-copying a local sub-range in one seqlock acquisition.
+**Deferred:** a per-cell "casts AO" predicate distinct from `has_geometry`;
+non-cube block shapes (orientation bits); incremental remesh + per-chunk mesh
+cache; LOD seam stitching; non-uniform-tile atlas support in the shipped shader;
+threaded meshing (the mesher already only needs seqlock read access + `snapshot_hot`).
 
 ---
 
@@ -393,13 +412,15 @@ copying a local sub-range in one seqlock acquisition.
 | FD2 | thread-safe unload = opt-in `ChunkStorage::Shared` (`shared_ptr` handles); no epoch/hazard machinery |
 | FD8 | mesher takes `has_geometry` + `is_hidden` (transparency); single-predicate `mesh_chunk` kept as the opaque convenience |
 | FD9 | `Chunk::revision()` — monotonic write counter, a dirty signal |
+| §4.2 | ambient occlusion = opt-in `MeshOptions::ambient_occlusion`; AO in the merge key (fewer merges); level-0 only; `occlusion` per vertex |
 
 Adopted from the benchmark verdicts: strict `atomic_ref` hot tier as the default
-(D3); a sharded `World` directory (D5, §1.5). Deferred with triggers (see
+(D3); a sharded `World` directory (D5, §1.5). Adopted as opt-in: ambient
+occlusion (D6, §4.2). Deferred with triggers (see
 `docs/plans/design-followups.md`): CAS single-writer seqlock (world-gen profile),
-a generational chunk handle (if `Shared` is adopted widely), AO (opt-in feature),
-continuous collision / shape casts (on demand). Won't do: a block-model system
-for non-cube shapes (engine territory).
+a generational chunk handle (if `Shared` is adopted widely), continuous collision
+/ shape casts (on demand). Won't do: a block-model system for non-cube shapes
+(engine territory).
 
 ## Known follow-ups (cross-cutting, not tied to one subsystem)
 
