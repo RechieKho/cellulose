@@ -48,7 +48,7 @@ Legend: `[x]` done · `[ ]` not started · `[~]` partially done / needs follow-u
       never recorded.
 
 Suite after close-out: **21/21** green; configure + build warning-free for
-`inc/cellulose/*`; demo prints `chunks loaded: 1` / `block at (1,2,3): 42`.
+`inc/cellulose/*`. (Suite is now 70; the demo is a voxel game — history above.)
 
 ---
 
@@ -112,8 +112,9 @@ Design: `ARCHITECTURE_SPEC.md` §4. Plan (decisions D1–D11):
       sampled via seqlock snapshots; cross-chunk face culling; absent chunk = air.
 - [x] **T3** — `mesh_chunk_lod(world, chunk_position, level, is_solid)` —
       any-solid macro-cells, first-solid attributes, quads scaled by `1 << level`.
-- [x] **T4** — raylib render demo in `src/main.cpp` (ChunkMesh → `Mesh` →
-      `DrawModel` under an orbital camera; prints vertex / triangle counts).
+- [x] **T4** — raylib render demo in `src/main.cpp` (since replaced by the
+      minimal voxel game: fly camera, raycast, LMB break / RMB place, per-chunk
+      remesh on edit).
 - [x] **T5** — umbrella + `ARCHITECTURE_SPEC` §4 + this file; suite 63/63.
 
 Output is renderer-neutral (chunk-local `f32` vertices; raylib only in the demo).

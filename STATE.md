@@ -17,7 +17,7 @@ for the *backlog*, `REMAINING_TASKS.md`; for phase-by-phase rationale,
 | `docs/plans/phase-{2,3,4}-*.md` | the per-phase implementation plans (executed) |
 | `docs/plans/design-followups.md` | the 10 design decisions from the design review + triggers for the deferred ones |
 | `inc/cellulose/*.hpp` | the library (header-only) |
-| `src/main.cpp` | the raylib demo (the only `.cpp` in `src/`) |
+| `src/main.cpp` | the minimal voxel game demo (the only `.cpp` in `src/`) |
 | `tests/test_*.cpp` | doctest cases, auto-globbed |
 
 There is no `CLAUDE.md`; this file is the closest thing. `.superpowers/` and the
@@ -50,12 +50,14 @@ ctest --test-dir build       # <3 s; 70 cases
 ```
 
 - Test binary: `build/tests/<Config>/cellulose_tests.exe`. Demo:
-  `build/<Config>/cellulose.exe` (multi-config generator → `Debug/` subdir).
-- **The demo opens a raylib window and blocks.** To check its stdout in a script:
+  `build/<Config>/cellulose.exe` (multi-config generator → `Debug/` subdir). The
+  demo (`src/main.cpp`) is a **minimal voxel game** — fly camera, LMB break, RMB
+  place — gated behind `CELLULOSE_BUILD_DEMO` (ON by default).
+- **The demo opens a raylib window and blocks.** To smoke-check in a script:
   run detached, `sleep 4`, then `taskkill //F //IM cellulose.exe`. Expect
-  `vertices: 304` / `triangles: 152`. **Stray `cellulose.exe` processes from
-  earlier runs will hold `build/` locked** (`rm -rf build` fails with "Device or
-  resource busy") — `taskkill //F //IM cellulose.exe` first.
+  `world: 9 chunks generated` on stdout and clean raylib init, no errors.
+  **Stray `cellulose.exe` processes from earlier runs will hold `build/` locked**
+  (`rm -rf build` fails "Device or resource busy") — `taskkill //F //IM cellulose.exe` first.
 - CI (`.github/workflows/`) **builds only** on Linux/macOS/Windows and **does not
   run ctest**. `lint.yml` runs `clang-format` on **`src/**` only**. So a broken
   test or an `inc/` format slip passes CI — check locally.

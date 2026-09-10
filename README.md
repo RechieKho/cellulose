@@ -2,6 +2,55 @@
 
 `cellulose` is a performant C++ voxel library providing spatial data structures and operations for Minecraft-style voxel engines under concurrent settings.
 
+## Example — break and place blocks
+
+The core of a Minecraft-style edit loop is three calls: `raycast` to find the
+targeted block, a `hot_attribute` write to change it, and `mesh_chunk` to rebuild
+the render mesh. `src/main.cpp` is the full playable version (raylib window, fly
+camera); this is the substance:
+
+```cpp
+#include <cellulose/cellulose.hpp>
+
+cellulose::World<> world;
+
+// generate a slab of terrain in one chunk (1 = grass, 2 = dirt)
+for (int x = 0; x < 32; ++x)
+    for (int z = 0; z < 32; ++z)
+        for (int y = 0; y <= 6; ++y)
+            world.chunk({ 0, 0, 0 })
+                 .hot_attribute({ cellulose::u8(x), cellulose::u8(y), cellulose::u8(z) })
+                 .block_id = (y == 6 ? 1 : 2);
+
+// "solid" for queries and meshing: any non-air block
+const auto solid = [](const cellulose::HotCellAttribute &a) { return a.block_id != 0; };
+
+// aim a ray (from a camera, say) and act on what it hits
+const cellulose::Ray ray{ /*origin*/ { 5, 20, 5 }, /*direction*/ { 0, -1, 0 } };
+
+if (auto hit = cellulose::raycast(world, ray, 32.0, solid)) {
+    // LEFT CLICK — break the block you're looking at
+    world.find_chunk(cellulose::to_chunk_position(hit->cell))
+         ->hot_attribute(cellulose::to_local_position(hit->cell)).block_id = 0;
+
+    // RIGHT CLICK — place a block against the face you hit
+    const cellulose::WorldPosition against{
+        hit->cell.x + hit->normal.x, hit->cell.y + hit->normal.y, hit->cell.z + hit->normal.z
+    };
+    world.chunk(cellulose::to_chunk_position(against))
+         .hot_attribute(cellulose::to_local_position(against)).block_id = 1;
+}
+
+// rebuild the chunk's geometry after the edit
+const cellulose::ChunkMesh mesh = cellulose::mesh_chunk(world, { 0, 0, 0 }, solid);
+// mesh.vertices / mesh.indices → your renderer
+// (cellulose/raylib.hpp has `to_raylib_mesh` if you use raylib)
+```
+
+Every accessor here has a lock-taking counterpart (`read_hot` / `write_hot`,
+`ChunkStorage::Shared`, …) for doing this from worker threads — see
+[`ARCHITECTURE_SPEC.md`](ARCHITECTURE_SPEC.md).
+
 ## Design and Implementation Strategy
 
 The four core design concerns are:

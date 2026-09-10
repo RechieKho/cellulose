@@ -345,7 +345,7 @@ copying a local sub-range in one seqlock acquisition.
 | §3 | queries take a `bool(HotType)` predicate; no built-in solidity; cells read as seqlock snapshots |
 | §3 | `raycast` = Amanatides & Woo DDA; `move_aabb` = axis-separated swept "collide and slide" |
 | §3 | `vector.hpp` (`Vector3<T>`, `Aabb`) is raylib-free |
-| §4 | mesher output is renderer-neutral (`MeshVertex` / `ChunkMesh`); raylib bridge lives only in the demo |
+| §4 | mesher output is renderer-neutral (`MeshVertex` / `ChunkMesh`); the raylib bridge is the opt-in `cellulose/raylib.hpp` (not in the umbrella), used only by the demo |
 | §4 | greedy meshing with `(block_id, face-brightness)` merge keys + hidden-face culling; cubes only (orientation bits unused) |
 | §4 | LOD = any-solid macro-cells, first-solid attributes, quads scaled by `1 << level` |
 | FD1 | all three attribute tiers are consumer-supplied; `HotAttribute` concept requires only `block_id`; brightness via the `face_brightness` CPO |
