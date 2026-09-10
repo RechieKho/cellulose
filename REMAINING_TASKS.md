@@ -73,18 +73,25 @@ TSan-clean Linux build).
 
 ---
 
-## Phase 3 — Spatial Querying — **not started**
+## Phase 3 — Spatial Querying — **planned, not started**
 
-Design: `ARCHITECTURE_SPEC.md` §3. Built on `World` / `Chunk`.
+Design: `ARCHITECTURE_SPEC.md` §3. Plan (decisions D1–D10):
+`docs/plans/phase-3-spatial-querying.md`.
 
-- [ ] **Raycasting** — 3D DDA per Amanatides & Woo fast voxel traversal;
-      returns hit cell, face, and distance.
-- [ ] **Volumetric queries** — retrieve voxel data within an AABB and within a
-      sphere.
-- [ ] **Collision detection** — collision normals + positional correction for a
-      target AABB and a velocity vector (physics-integration baseline).
-- [ ] Query tests (known scenes, analytic expected hits).
-- [ ] Write the Phase 3 implementation plan before starting.
+- [x] Phase 3 implementation plan.
+- [ ] **T1** — `vector.hpp`: `Vector3<T>` (`Vec3`/`Vec3d`/`Vec3i`), `Aabb`,
+      `to_cell` / `to_point`.
+- [ ] **T2** — `raycast()` — Amanatides & Woo voxel DDA; hit cell, face normal,
+      distance.
+- [ ] **T3** — `for_each_cell_in_aabb` / `for_each_cell_in_sphere` volume queries.
+- [ ] **T4** — `move_aabb()` — axis-separated swept AABB-vs-voxel collision
+      (position correction + normal).
+- [ ] **T5** — umbrella + docs + sweep.
+
+All queries take a caller `bool(const HotCellAttribute &)` solidity predicate and
+read cells through the per-chunk seqlock. Deferrals (see plan): raycast chunk
+caching, bulk chunk snapshots, continuous collision, sphere/capsule casts,
+registry-driven solidity.
 
 ---
 
@@ -132,3 +139,7 @@ Design: `ARCHITECTURE_SPEC.md` §4.
       element access to `std::atomic_ref` and benchmark the cost.
 - [ ] **CAS single-writer seqlock** (deferred from Phase 2). Replace the per-tier
       writer `std::mutex` with a CAS-claimed writer slot if profiling shows it hot.
+- [ ] **`BlockRegistryBuilder::build()` bug** (pre-existing). `build()` pre-sizes
+      `Store` to N default blocks then `push_back`s N more, and fills
+      `name_id_map` with indices 0..N-1 while the real blocks land at N..2N-1.
+      Blocks a `BlockRegistry`-backed solidity predicate for Phase 3 queries.
