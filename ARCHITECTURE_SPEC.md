@@ -91,26 +91,39 @@ for indices produced by `encode_cell_index` from an in-range `LocalPosition`.
 
 ### 1.4 Chunk (`chunk.hpp`)
 
-- `inline constexpr size chunk_edge_length = 32;`
-- `inline constexpr size chunk_cell_count = 32768;`
-- `Chunk<PackedCollection = PackedCellAttributeCollection<chunk_cell_count>,
+- `inline constexpr size chunk_edge_length = 32;` / `chunk_cell_count = 32768;`
+- `Chunk<HotAttribute HotType = HotCellAttribute,
+   PackedCollection = PackedCellAttributeCollection<chunk_cell_count>,
    SparseCollection = SparseCellAttributeCollection<>>` — `final`,
-  default-constructible (hot array zero-initialised).
+  default-constructible, non-movable.
+
+**All three attribute tiers are consumer-supplied.** The base library ships one
+reference type (`HotCellAttribute`) and no cold/freezing types — it has no need
+for them. A consumer plugs in their own via the template parameters;
+`PackedChunkAttributes<T…>` / `SparseChunkAttributes<T…>` are the ergonomic
+spellings for the cold / freezing packs.
+
+**`HotAttribute` concept** (`cell.hpp`) — the only requirements on a hot type:
+`std::is_trivially_copyable_v` (the seqlock snapshots it by value),
+`std::default_initializable` (fresh chunks zero-fill), and a `block_id` member
+convertible to `BlockID` (every query answers "what block did I hit"). Brightness
+/ orientation are **not** required — the mesher reads them through the
+`face_brightness(attr, face)` customization point (defaulted for `HotCellAttribute`,
+flat-shaded when a custom type provides no overload).
 
 | Member (+ const overload) | Purpose |
 |---------------------------|---------|
-| `read_hot(fn) const` / `write_hot(fn)` | run `fn` over the hot `std::array` under the hot seqlock — **the concurrent path** |
+| `read_hot(fn) const` / `write_hot(fn)` | run `fn` over the hot `std::array<HotType>` under the hot seqlock — **the concurrent path** |
 | `read_cold(fn) const` / `write_cold(fn)` | run `fn` over the packed collection under the cold seqlock |
 | `read_sparse(fn) const` / `write_sparse(fn)` | run `fn` over the sparse collection under the sparse `RWLock` |
-| `hot_attribute(LocalPosition\|CellIndex) -> HotCellAttribute&` | address one cell — **unsynchronised**, single-threaded / caller-locked only |
-| `fill_hot(const HotCellAttribute&)` | set every cell — unsynchronised |
-| `packed() -> PackedCollection&` / `sparse() -> SparseCollection&` | direct collection access — unsynchronised |
+| `revision() const -> u64` | monotonic change counter, bumped by every `write_*` (conservative — bumps on no-op writes); a dirty signal for meshing / networking / persistence |
+| `hot_attribute(LocalPosition\|CellIndex) -> HotType&` | address one cell — **unsynchronised**, single-threaded / caller-locked only |
+| `fill_hot(const HotType&)`, `packed()`, `sparse()` | unsynchronised direct access |
 
-`Chunk` is `alignas(cache_line_size)` and non-movable (it embeds `std::mutex` /
-`std::shared_mutex`); each of its three lock groups sits on its own cache line,
-clear of the voxel arrays and of each other (§2). A seqlock read functor must
-return a snapshot **by value** — a torn snapshot mid-write is discarded and the
-read retried, which is only sound over the fixed-size hot/cold arrays.
+`Chunk` is `alignas(cache_line_size)`; each lock group and the revision counter
+sit on their own cache line, clear of the voxel arrays and of each other (§2). A
+seqlock read functor must return a snapshot **by value** — a torn snapshot
+mid-write is discarded and the read retried, sound only over the fixed-size arrays.
 
 Storage tiers (from `README.md`, keyed by access frequency for 64-byte L1 line
 utilization):
@@ -127,46 +140,43 @@ consequence — a `Packed` field always costs `chunk_cell_count * sizeof(element
 attribute. `README.md`'s "> 8 bytes" for cold data is illustrative; the enforced
 split is `Packed` ≤ 8 < `Sparse` (a `static_assert` on each).
 
-**Locked (A8):** no concrete cold/freezing attribute type exists yet — both
-collection type parameters default to the *empty* collection so `Chunk<>` is
-zero-overhead. Later subsystems (lighting, tile entities) supply real types.
+Both collection parameters default to the *empty* collection so `Chunk<>` is
+zero-overhead.
 
-**Name-lookup gotcha:** inside `namespace cellulose::impl`, the unqualified name
-`HotCellAttribute` binds to the class *template* `impl::HotCellAttribute<>`, not
-the `cellulose::HotCellAttribute` alias. `chunk.hpp` and `world.hpp` qualify it as
-`cellulose::HotCellAttribute` at the affected sites. Any new `impl::` code that
-names `HotCellAttribute` as a type must do the same.
+**Name-lookup gotcha:** inside `namespace cellulose::impl`, unqualified
+`SeqLock` / `RWLock` / `Padded` / `HotCellAttribute` bind to the unspecialised
+templates, not the `cellulose::` aliases — `impl::` code qualifies them.
 
 ### 1.5 World (`world.hpp`)
 
-`World<ChunkType = Chunk<>>` over
-`ankerl::unordered_dense::map<ChunkPosition, std::unique_ptr<ChunkType>, ChunkPositionHash>`,
-`final`, non-movable:
+`World<ChunkType = Chunk<>, ChunkStorage Storage = ChunkStorage::Unique>` over
+`ankerl::unordered_dense::map<ChunkPosition, StoredChunk, ChunkPositionHash>`
+(`StoredChunk` = `unique_ptr` / `shared_ptr` by `Storage`), `final`, non-movable.
+A `std::shared_mutex` guards the directory.
 
 | Member | Semantics |
 |--------|-----------|
 | `has_chunk(ChunkPosition) const -> bool` | shared directory lock |
-| `find_chunk(ChunkPosition) -> ChunkType*` (+ const) | lookup-only, `nullptr` when absent; shared lock; returned pointer stays valid across later inserts/erases |
-| `chunk(ChunkPosition) -> ChunkType&` | **get-or-create** (`make_unique` on miss); exclusive lock |
-| `remove_chunk(ChunkPosition) -> bool` | `true` if erased; exclusive lock; **caller must ensure no other thread is using that chunk** |
+| `find_chunk(ChunkPosition) -> ChunkHandle` (+ const) | `nullptr` when absent; shared lock. `ChunkHandle` = raw `ChunkType*` under `Unique` (valid across other chunks' inserts/erases), `shared_ptr<ChunkType>` under `Shared` (pins the chunk) |
+| `chunk(ChunkPosition) -> ChunkType&` | **get-or-create**; exclusive lock |
+| `remove_chunk(ChunkPosition) -> bool` | `true` if erased; exclusive lock. Under `Unique`, **the caller must ensure no other thread is using that chunk**; under `Shared`, outstanding handles keep it alive |
 | `chunk_count() const -> size` | shared lock |
 | `for_each_chunk(Visitor&&)` | shared lock for the whole traversal; `visitor(const ChunkPosition&, ChunkType&)` |
 | `find_hot_attribute(WorldPosition) -> HotCellAttribute*` (+ const) | resolve through the containing chunk; `nullptr` when absent — **unsynchronised deref**, single-threaded / caller-locked |
 
-**C1 — resolved (Phase 2).** Chunks are held behind `std::unique_ptr`, so a
-`ChunkType*` from `find_chunk` / `chunk` stays valid across later directory
-inserts **and** erases — only the pointer slot in the table moves. A
-`std::shared_mutex` guards the directory (the table); per-chunk voxel data has
-its own locks (§2, §1.4). Thread-safe *unload while readers hold a pointer* is
-still deferred — hence the `remove_chunk` contract above.
+**C1 — resolved (Phase 2).** `unique_ptr` storage keeps a `ChunkType*` valid
+across other chunks' inserts/erases. Thread-safe *unload while a reader holds a
+pointer* is handled by opting into `ChunkStorage::Shared` (handles pin the
+chunk); the default `Unique` keeps the caller-quiescence contract on
+`remove_chunk`. No epoch / hazard-pointer machinery — see `docs/plans/design-followups.md`.
 
 ### 1.6 Integrated pre-existing primitives
 
-- `cell.hpp` — `HotCellAttribute` (4-byte AoS element; `u16 state` bit-maps a
-  `BlockState`: pitch 2b, yaw 2b, then 2b brightness per face ×6, using Raylib's
-  axis convention), `PackedCellAttributeCollection<CellCount, Attributes…>` (SoA,
-  element `sizeof <= 8`), `SparseCellAttributeCollection<Attributes…>` (per-cell
-  map, element `sizeof > 8`). Both
+- `cell.hpp` — `HotCellAttribute` (the reference hot type: 4-byte AoS element;
+  `u16 state` bit-maps pitch 2b, yaw 2b, then 2b brightness per face ×6, Raylib's
+  axis convention), the `HotAttribute` concept, the `face_brightness` CPO,
+  `PackedCellAttributeCollection<CellCount, Attributes…>` (SoA, `sizeof <= 8`),
+  `SparseCellAttributeCollection<Attributes…>` (per-cell map, `sizeof > 8`). Both
   collections' `get<Attribute>()` return **references** (+ const overload).
 - `block.hpp` — `BlockID = u16`, `Block`, `BlockRegistry`, `BlockBuilder`,
   `BlockRegistryBuilder`, name↔id lookup.
@@ -271,13 +281,20 @@ include it with raylib linked): `to_raylib_mesh(ChunkMesh, color_fn) -> Mesh`.
 
 | Function (`namespace cellulose`) | Behaviour |
 |----------------------------------|-----------|
-| `greedy_mesh(MeshSample apron grid, size, block_scale) -> ChunkMesh` | The 0fps greedy mesher on a pre-sampled `(size+2)³` grid: per face direction and slice, build a `(block_id << 8 \| brightness) + 1` key mask (a face is skipped where its neighbour is solid), merge maximal rectangles, emit one quad each, scaled by `block_scale`. |
-| `mesh_chunk(world, chunk_position, is_solid) -> ChunkMesh` | Samples the `34³` apron via `Chunk::read_hot` snapshots (absent neighbour chunk ⇒ empty ⇒ boundary face kept), then `greedy_mesh(…, 32, 1)`. |
-| `mesh_chunk_lod(world, chunk_position, level, is_solid) -> ChunkMesh` | `level` 0–5: merges each `(1 << level)³` cell block into one macro-cell — **solid if any** cell is, attributes from the **first solid** cell — then greedy-meshes the `32 >> level` grid with `block_scale = 1 << level` (still spans `[0, 32]`). `level 0` ≡ `mesh_chunk`. |
+| `greedy_mesh(MeshSample grid, size, block_scale) -> ChunkMesh` | The 0fps greedy mesher on a `size³` grid of `MeshSample{ visible[6], block_id, brightness[6] }`: per face direction and slice, build a `(block_id << 8 \| brightness) + 1` key mask over the cells whose face is `visible`, merge maximal rectangles, emit one CCW quad each scaled by `block_scale`. |
+| `mesh_chunk(world, cp, is_solid) -> ChunkMesh` | Opaque-cube convenience — `has_geometry = is_solid`, `is_hidden(near, far) = is_solid(far)`. |
+| `mesh_chunk(world, cp, has_geometry, is_hidden) -> ChunkMesh` | General form: `has_geometry(attr)` decides whether a cell emits faces, `is_hidden(near, far)` decides face culling — for transparency / cutout (e.g. water-vs-water hidden, water-vs-glass not). |
+| `mesh_chunk_lod(world, cp, level, …)` | `level` 0–5 (3-arg and 4-arg rule forms): merges each `(1 << level)³` block into one macro-cell (geometry if any cell has it, attributes from the first) then greedy-meshes the `32 >> level` grid with `block_scale = 1 << level`. `level 0` ≡ `mesh_chunk`. |
 
-**Merge key** = `(block_id, that-face's 2-bit brightness)` — brightness
-differences stay visible; `HotCellAttribute` pitch/yaw orientation bits are not
-consumed yet (cubes only).
+`impl::sample_chunk` builds the `n³` grid from `Chunk::read_hot` snapshots (an
+absent neighbour chunk is a default-constructed hot attribute), computing each
+`MeshSample::visible[face] = has_geometry(cell) && !is_hidden(cell, neighbour)` —
+so the culling decision lives where the attributes are, and `greedy_mesh` never
+looks at neighbours.
+
+**Merge key** = `(block_id, that-face's brightness)` (from the `face_brightness`
+CPO; flat for a hot type without it). Cubes only — `HotCellAttribute` pitch/yaw
+orientation bits are unused.
 
 The apron sampler (and `raycast` / `move_aabb`) walk cells through
 `impl::ChunkCursor` (`cursor.hpp`), which caches the current chunk pointer so a
@@ -319,12 +336,21 @@ copying a local sub-range in one seqlock acquisition.
 | D7 | functor accessors added **alongside** the bare ones; bare ones stay, unsynchronised |
 | D8–D9 | `cache_line_size` constant; `Chunk` + each lock `alignas`-padded to it |
 | D11 | `remove_chunk` requires caller-guaranteed quiescence (safe unload deferred) |
-| §3 | queries take a `bool(HotCellAttribute)` predicate; no built-in solidity; cells read as seqlock snapshots |
+| §3 | queries take a `bool(HotType)` predicate; no built-in solidity; cells read as seqlock snapshots |
 | §3 | `raycast` = Amanatides & Woo DDA; `move_aabb` = axis-separated swept "collide and slide" |
 | §3 | `vector.hpp` (`Vector3<T>`, `Aabb`) is raylib-free |
 | §4 | mesher output is renderer-neutral (`MeshVertex` / `ChunkMesh`); raylib bridge lives only in the demo |
 | §4 | greedy meshing with `(block_id, face-brightness)` merge keys + hidden-face culling; cubes only (orientation bits unused) |
 | §4 | LOD = any-solid macro-cells, first-solid attributes, quads scaled by `1 << level` |
+| FD1 | all three attribute tiers are consumer-supplied; `HotAttribute` concept requires only `block_id`; brightness via the `face_brightness` CPO |
+| FD2 | thread-safe unload = opt-in `ChunkStorage::Shared` (`shared_ptr` handles); no epoch/hazard machinery |
+| FD8 | mesher takes `has_geometry` + `is_hidden` (transparency); single-predicate `mesh_chunk` kept as the opaque convenience |
+| FD9 | `Chunk::revision()` — monotonic write counter, a dirty signal |
+
+Deferred with triggers (see `docs/plans/design-followups.md`): seqlock
+`atomic_ref` path (benchmark), CAS writer + directory sharding (profile), AO
+(opt-in feature), continuous collision / shape casts (on demand). Won't do: a
+block-model system for non-cube shapes (engine territory).
 
 ## Known follow-ups (cross-cutting, not tied to one subsystem)
 

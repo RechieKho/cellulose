@@ -125,10 +125,15 @@ sampler chunk-pointer caching.
 
 ## Cross-cutting / backlog
 
-- [ ] **Concrete cold & freezing attribute types.** `Chunk`'s packed/sparse
-      collections default to empty (A8). Lighting introduces a cold attribute;
-      tile entities introduce a freezing-cold one. Introduce them with their
-      owning subsystem.
+Design decisions D1–D10 (from the design review) and their triggers are in
+`docs/plans/design-followups.md`.
+
+- [x] **Attribute extensibility (D1).** All three tiers are consumer-supplied.
+      `Chunk<HotAttribute HotType = HotCellAttribute, Packed, Sparse>`; the
+      `HotAttribute` concept requires only `block_id`; the mesher reads brightness
+      through the `face_brightness` CPO. `PackedChunkAttributes` /
+      `SparseChunkAttributes` aliases. The base ships **no** concrete
+      cold/freezing types — by design; a subsystem that needs one supplies it.
 - [x] **Reconcile cold-data size.** Tiers are chosen by access frequency; the
       enforced split is `Packed` ≤ 8 < `Sparse` (`static_assert` on each; Sparse
       tightened `>= 8` → `> 8`), documented in `ARCHITECTURE_SPEC.md` §1.4. The
@@ -141,19 +146,21 @@ sampler chunk-pointer caching.
       `chunk_edge_length == (1 << chunk_edge_length_shift)`.
 - [x] **`to_chunk_position` narrowing.** Documented: correct while
       `|axis| < 2^(31 + shift)` (≈ ±2^36 blocks).
-- [ ] **Thread-safe chunk unload** (deferred from Phase 2). Reclaiming a `Chunk`
-      while worker threads may hold a `Chunk*` needs `shared_ptr` / hazard
-      pointers / epoch reclamation. Until then `remove_chunk` requires the caller
-      to guarantee quiescence.
-- [ ] **World directory scaling** (deferred from Phase 2). If the single
-      `shared_mutex` over the chunk map contends under many loader threads, shard
-      by hash bits or move to a concurrent map. Measure first.
-- [ ] **Seqlock memory model** (deferred from Phase 2). `Chunk::read_hot` /
-      `read_cold` read the plain arrays under the seqlock — a benign race that
-      ThreadSanitizer will flag. For a TSan-clean Linux build, switch the hot/cold
-      element access to `std::atomic_ref` and benchmark the cost.
-- [ ] **CAS single-writer seqlock** (deferred from Phase 2). Replace the per-tier
-      writer `std::mutex` with a CAS-claimed writer slot if profiling shows it hot.
+- [x] **Thread-safe chunk unload (D2).** Opt-in `World<ChunkType, ChunkStorage::Shared>`
+      stores `shared_ptr<Chunk>`; `find_chunk` returns a handle that pins the
+      chunk past `remove_chunk`. `Unique` (raw ptr, caller-quiescence) stays the
+      default. **Decided against** epoch / hazard-pointer reclamation for the base.
+- [ ] **Seqlock memory model (D3) — decided, deferred.** Keep the benign-race
+      fast path; add a `std::atomic_ref` element path selectable at compile time
+      (auto-on under `__SANITIZE_THREAD__`). **Trigger:** a microbenchmark of the
+      meshing hot path showing the cost is acceptable, or a need for TSan-clean CI.
+- [ ] **CAS single-writer seqlock (D4) — decided, deferred.** Fold the writer
+      claim into the sequence counter's low bit (CAS `even → odd`), dropping the
+      per-tier `std::mutex` (~160 B/chunk). **Trigger:** a profile showing the
+      writer mutex is hot.
+- [ ] **World directory scaling (D5) — decided, deferred.** Shard the chunk map
+      by `ChunkPosition` hash bits. **Trigger:** a profile showing directory-mutex
+      contention under many loader threads.
 - [x] **`BlockRegistryBuilder::build()` bug** (pre-existing) — fixed (reserve +
       push; ids map to the named blocks); `test_block.cpp` added. Unblocks a
       `BlockRegistry`-backed solidity predicate.
@@ -164,17 +171,23 @@ sampler chunk-pointer caching.
       `for_each_cell_in_aabb` was already chunk-major. Still open: a **bulk
       per-chunk `read_hot`** for volume/mesh copying the local sub-range in one
       seqlock acquisition instead of one per cell.
-- [ ] **Continuous collision** (deferred from Phase 3). `move_aabb` is exact per
-      axis but resolves axes in a fixed X→Y→Z order; add conservative
-      advancement / a swept test for fast diagonal movers if needed.
-- [ ] **Sphere / capsule casts** (deferred from Phase 3).
-- [ ] **Meshing follow-ups** (deferred from Phase 4): per-vertex ambient
-      occlusion (part of the merge key, or it breaks merging); texture-atlas UVs
-      (`block_id → atlas rect`, needs `Block` texture data); non-cube block shapes
-      from `HotCellAttribute` pitch/yaw; a transparent / cutout pass; dirty-flag
-      incremental remesh + a per-`ChunkPosition` mesh cache; LOD seam stitching
-      (skirts / transition cells between adjacent levels); run `mesh_chunk` on a
-      worker pool. (Apron `find_chunk`-per-cell is fixed — see `ChunkCursor`.)
+- [x] **Transparency / cutout meshing (D8).** `mesh_chunk` / `mesh_chunk_lod`
+      take `has_geometry(attr)` + `is_hidden(near, far)` (4-arg overload); the
+      single-predicate form is kept as the opaque-cube convenience.
+- [x] **Incremental-remesh signal (D9).** `Chunk::revision()` — a monotonic write
+      counter. A `ChunkMeshCache` (dirty set + neighbour invalidation) may follow
+      as an optional module.
+- [ ] **Continuous collision / shape casts (D10) — decided, deferred.** Keep
+      `move_aabb`. Add `sweep_aabb` (Minkowski time-of-impact, no resolution) and
+      sphere/capsule casts **on demand**.
+- [ ] **Ambient occlusion (D6) — decided.** Consumer's concern; if built into the
+      mesher it is an opt-in flag with AO in the merge key, never default.
+- [x] **Non-cube block shapes (D7) — won't do.** Greedy meshing is a cube
+      optimisation; a block-model system belongs in the consumer's engine.
+- [ ] **Other meshing follow-ups:** texture-atlas UVs (`block_id → atlas rect`,
+      needs `Block` texture data); a per-`ChunkPosition` `ChunkMeshCache` using
+      `revision()`; LOD seam stitching (skirts between adjacent levels); run
+      `mesh_chunk` on a worker pool; a bulk per-chunk `read_hot`.
 - [x] **`ChunkMesh → raylib::Mesh` bridge** moved to an opt-in
       `cellulose/raylib.hpp` (not in the umbrella; include it with raylib on the
       link line). `to_raylib_mesh(mesh, color_fn)` + a grayscale default; the demo
