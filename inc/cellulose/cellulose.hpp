@@ -7,6 +7,7 @@
 #include "coordinate.hpp"
 #include "inspect.hpp"
 #include "morton.hpp"
+#include "sync.hpp"
 #include "types.hpp"
 #include "world.hpp"
 
