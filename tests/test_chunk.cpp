@@ -104,10 +104,10 @@ TEST_CASE("revision advances on every write and not on reads") {
 }
 
 // The writer keeps block_id == state; a torn read (seen without the seqlock)
-// would pair fields from two different writes. Not applicable under
-// CELLULOSE_STRICT_ATOMICS, where the write view only permits whole-element
-// stores (and so cannot tear).
-#ifndef CELLULOSE_STRICT_ATOMICS
+// would pair fields from two different writes. Only meaningful under
+// CELLULOSE_LOOSE_ATOMICS — the default strict path reads/writes whole elements
+// through std::atomic_ref and so cannot tear (nor permit field assignment).
+#ifdef CELLULOSE_LOOSE_ATOMICS
 TEST_CASE("concurrent write_hot / read_hot never yields a torn HotCellAttribute") {
 	cellulose::Chunk<> chunk;
 	const auto index = cellulose::encode_cell_index(cellulose::LocalPosition{ 10, 20, 30 });
@@ -145,4 +145,4 @@ TEST_CASE("concurrent write_hot / read_hot never yields a torn HotCellAttribute"
 
 	CHECK(tears.load() == 0);
 }
-#endif // CELLULOSE_STRICT_ATOMICS
+#endif // CELLULOSE_LOOSE_ATOMICS

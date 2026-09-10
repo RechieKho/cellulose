@@ -17,7 +17,8 @@ jobs:
             flags: "-DCMAKE_BUILD_TYPE=Release"
             run: "./build/benchmarks/cellulose_benchmarks --scenario all --duration-ms 1000"
           - name: tsan
-            flags: "-DCMAKE_BUILD_TYPE=RelWithDebInfo -DCELLULOSE_SANITIZER=thread -DCELLULOSE_STRICT_ATOMICS=ON -DCELLULOSE_SEQLOCK_STATS=ON"
+            # strict atomics are the default now; TSan just verifies it stays clean
+            flags: "-DCMAKE_BUILD_TYPE=RelWithDebInfo -DCELLULOSE_SANITIZER=thread -DCELLULOSE_SEQLOCK_STATS=ON"
             run: "TSAN_OPTIONS=halt_on_error=1 ./build/benchmarks/cellulose_benchmarks --scenario workload --duration-ms 2000"
           - name: asan
             flags: "-DCMAKE_BUILD_TYPE=RelWithDebInfo -DCELLULOSE_SANITIZER=address"

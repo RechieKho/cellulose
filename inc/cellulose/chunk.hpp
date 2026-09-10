@@ -12,6 +12,16 @@
 #include <atomic>
 #include <mutex>
 
+// The hot tier is read through `std::atomic_ref` by default (`read_hot` /
+// `write_hot`) — no data race, ThreadSanitizer-clean. Define
+// `CELLULOSE_LOOSE_ATOMICS` (CMake: `-DCELLULOSE_LOOSE_ATOMICS=ON`) to opt back
+// into the plain-array benign race: writers are ~30% faster but a `write_hot`
+// closure may then assign fields, and the layer is UB by the standard / flagged
+// by TSan. See `docs/plans/design-followups.md` decision 3.
+#if !defined(CELLULOSE_STRICT_ATOMICS) && !defined(CELLULOSE_LOOSE_ATOMICS)
+#define CELLULOSE_STRICT_ATOMICS
+#endif
+
 namespace cellulose {
 
 /// @brief Number of cells along one axis of a chunk.

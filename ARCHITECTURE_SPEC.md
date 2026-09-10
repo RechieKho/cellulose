@@ -125,6 +125,14 @@ sit on their own cache line, clear of the voxel arrays and of each other (§2). 
 seqlock read functor must return a snapshot **by value** — a torn snapshot
 mid-write is discarded and the read retried, sound only over the fixed-size arrays.
 
+**Hot-tier atomicity (D3).** By default `read_hot` / `write_hot` reach the hot
+array through `std::atomic_ref` (relaxed loads/stores) — no data race,
+ThreadSanitizer-clean, ≈free on the pure-read (meshing) path (benchmark B2). A
+`write_hot` closure therefore assigns **whole elements** (`hot[i] = value`), not
+fields. `-DCELLULOSE_LOOSE_ATOMICS=ON` (macro `CELLULOSE_LOOSE_ATOMICS`) opts
+back into the plain-array benign race: ~30% faster writes, field assignment
+allowed, but UB by the standard and TSan-flagged.
+
 Storage tiers (from `README.md`, keyed by access frequency for 64-byte L1 line
 utilization):
 
@@ -217,7 +225,7 @@ block at unacceptable memory cost.
 
 | Header | Type | Used for | Mechanism |
 |--------|------|----------|-----------|
-| `seqlock.hpp` | `SeqLock` | hot tier, cold (packed) tier — one each (`impl::TierLock` = seqlock + writer `std::mutex`) | atomic sequence counter, odd→write→even; readers snapshot-and-retry, never block; writers never starved. Read functor must return **by value**; torn snapshots are discarded. Sound only over the fixed-size arrays. `write()` is not writer-vs-writer safe — the paired `std::mutex` serialises writers. |
+| `seqlock.hpp` | `SeqLock` | hot tier, cold (packed) tier — one each (`impl::TierLock` = seqlock + writer `std::mutex`) | atomic sequence counter, odd→write→even; readers snapshot-and-retry, never block; writers never starved. Read functor must return **by value**; torn snapshots are discarded. Sound only over the fixed-size arrays. `write()` is not writer-vs-writer safe — the paired `std::mutex` serialises writers. Hot-tier element access defaults to `std::atomic_ref` (D3, above); `CELLULOSE_LOOSE_ATOMICS` reverts to the benign race. |
 | `rwlock.hpp` | `RWLock` | freezing-cold (sparse) tier | `std::shared_mutex` wrapper; exclusive writes, because the sparse map may reallocate. |
 | `sync.hpp` | `cache_line_size`, `Padded<T>` | false-sharing elimination | `Padded<T>` over-aligns a value to a full cache line. |
 
@@ -384,10 +392,12 @@ copying a local sub-range in one seqlock acquisition.
 | FD8 | mesher takes `has_geometry` + `is_hidden` (transparency); single-predicate `mesh_chunk` kept as the opaque convenience |
 | FD9 | `Chunk::revision()` — monotonic write counter, a dirty signal |
 
-Deferred with triggers (see `docs/plans/design-followups.md`): seqlock
-`atomic_ref` path (benchmark), CAS writer + directory sharding (profile), AO
-(opt-in feature), continuous collision / shape casts (on demand). Won't do: a
-block-model system for non-cube shapes (engine territory).
+Adopted from the benchmark verdicts: strict `atomic_ref` hot tier as the default
+(D3); a sharded `World` directory (D5, §1.5). Deferred with triggers (see
+`docs/plans/design-followups.md`): CAS single-writer seqlock (world-gen profile),
+a generational chunk handle (if `Shared` is adopted widely), AO (opt-in feature),
+continuous collision / shape casts (on demand). Won't do: a block-model system
+for non-cube shapes (engine territory).
 
 ## Known follow-ups (cross-cutting, not tied to one subsystem)
 

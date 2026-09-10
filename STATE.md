@@ -125,14 +125,16 @@ stricter. Two classes of thing that bit here and will bite again:
    Style: **tabs**, `ColumnLimit: 0` (no wrapping), `{ a, b }` brace spacing,
    `} //namespace x` closers, trailing return types, `p_`-prefixed params, no
    `m_` on public members. `.clang-format` says `Standard: c++17` but the code is
-   C++20 (concepts, `<atomic_ref>`-free but uses `std::default_initializable`).
+   C++20 (concepts, `std::atomic_ref`, `std::default_initializable`).
 
-5. **The seqlock is a documented benign race.** `Chunk::read_hot` / `read_cold`
-   read the plain arrays while a writer writes plain; the retry discards torn
-   reads. Sound on x86/ARM for the fixed-size arrays, **UB by the standard**,
-   **TSan will flag it**. Don't "fix" it without reading design decision D3
-   (`docs/plans/design-followups.md`) — the plan is a compile-time `atomic_ref`
-   opt-in, gated on a benchmark.
+5. **Hot tier is `std::atomic_ref` by default** (D3 adopted). `chunk.hpp`
+   auto-defines `CELLULOSE_STRICT_ATOMICS` unless `CELLULOSE_LOOSE_ATOMICS` is
+   set. Consequences: a **`write_hot` closure must assign whole elements**
+   (`hot[i] = HotCellAttribute{...}`), never fields (`hot[i].block_id = ...`) —
+   that's a compile error under strict; `read_hot`'s `hot` arg is an
+   `AtomicReadView` (`hot[i]` yields a value, not a reference). `-DCELLULOSE_LOOSE_ATOMICS=ON`
+   restores the old plain-array benign race (faster writes, TSan-flagged, UB) —
+   the torn-read stress tests only compile in that config.
 
 6. **Custom hot attribute types** must satisfy `concept HotAttribute`:
    `std::is_trivially_copyable_v` + `std::default_initializable` + a `block_id`
@@ -200,13 +202,16 @@ stricter. Two classes of thing that bit here and will bite again:
 - LOD seam stitching (skirts between adjacent-level chunks).
 - Threaded meshing (`mesh_chunk` on a worker pool — it only needs read access).
 
+**Adopted from the benchmark verdicts:** D3 (strict `atomic_ref` hot tier — now
+the default, gotcha 5) and D5 (sharded `World` directory — `world.hpp`,
+`shard_count` shards).
+
 **Decided, deferred — do NOT start without the trigger** (see
 `docs/plans/design-followups.md`):
-- D3 seqlock `atomic_ref` path — trigger: a meshing-hot-path benchmark, or a need
-  for TSan-clean CI.
 - D4 CAS single-writer seqlock (drop the per-tier `std::mutex`) — trigger: a
   profile showing the writer mutex is hot.
-- D5 shard the world directory mutex — trigger: a profile showing contention.
+- Generational chunk handle (replace `shared_ptr` under `ChunkStorage::Shared`) —
+  trigger: streaming engines adopting `Shared` widely (B5: ~25% lookup cost).
 - D10 `sweep_aabb` (continuous collision) + sphere/capsule casts — trigger: an
   actual use for fast movers / shape casts.
 - D6 ambient occlusion — if built, it's an opt-in flag with AO in the merge key,

@@ -4,8 +4,10 @@
 #include "cell.hpp"
 #include "chunk.hpp"
 #include "coordinate.hpp"
+#include "sync.hpp"
 #include "types.hpp"
 #include <ankerl/unordered_dense.h>
+#include <array>
 #include <memory>
 #include <mutex>
 #include <shared_mutex>
@@ -28,11 +30,17 @@ enum class ChunkStorage {
 
 namespace impl {
 
-/// @brief The set of loaded chunks, indexed by chunk coordinate in a densely-stored hash table (`ankerl::unordered_dense`).
+/// @brief The set of loaded chunks, indexed by chunk coordinate in densely-stored
+/// hash tables (`ankerl::unordered_dense`).
 ///
-/// A `std::shared_mutex` guards the **directory** (the table): shared for lookups
-/// / iteration, exclusive for load (`chunk`) and unload (`remove_chunk`).
-/// Per-chunk voxel data is guarded separately by the locks inside each `Chunk`.
+/// The **directory** is **sharded**: `shard_count` independent
+/// `{ std::shared_mutex, sub-map }` pairs, a chunk position routed to one by the
+/// low bits of its hash. Each shard lock is shared for lookups, exclusive for
+/// load (`chunk`) / unload (`remove_chunk`), so lookups and edits to unrelated
+/// chunks — including a streaming thread loading elsewhere — do not contend on a
+/// single reader-count cache line (benchmark D5). `for_each_chunk` and
+/// `chunk_count` lock every shard (shared, in index order). Per-chunk voxel data
+/// is guarded separately by the locks inside each `Chunk`.
 ///
 /// Chunk lifetime follows `Storage` (see `ChunkStorage`). Under `Unique` a
 /// `ChunkType *` from `find_chunk` stays valid across *other* chunks' inserts and
@@ -44,11 +52,26 @@ class World final {
 private:
 	static constexpr bool is_shared = (Storage == ChunkStorage::Shared);
 
+	/// Directory shard count — a power of two so routing is a mask. 16 covers the
+	/// thread counts the benchmarks exercised with headroom.
+	static constexpr size shard_count = 16;
+
 	using StoredChunk = std::conditional_t<is_shared, std::shared_ptr<ChunkType>, std::unique_ptr<ChunkType>>;
 	using ChunkMap = ankerl::unordered_dense::map<ChunkPosition, StoredChunk, ChunkPositionHash>;
 
-	ChunkMap m_chunks;
-	mutable std::shared_mutex m_directory_mutex;
+	struct Shard final {
+		mutable std::shared_mutex mutex;
+		ChunkMap chunks;
+	};
+
+	std::array<Padded<Shard>, shard_count> m_shards;
+
+	auto shard_for(const ChunkPosition &p_position) -> Shard & {
+		return m_shards[ChunkPositionHash{}(p_position) & (shard_count - 1)].value;
+	}
+	auto shard_for(const ChunkPosition &p_position) const -> const Shard & {
+		return m_shards[ChunkPositionHash{}(p_position) & (shard_count - 1)].value;
+	}
 
 	auto make_stored_chunk() -> StoredChunk {
 		if constexpr (is_shared)
@@ -65,14 +88,16 @@ public:
 	using HotAttributeType = typename ChunkType::HotAttributeType;
 
 	auto has_chunk(const ChunkPosition &p_position) const -> bool {
-		const std::shared_lock guard(m_directory_mutex);
-		return m_chunks.contains(p_position);
+		const Shard &shard = shard_for(p_position);
+		const std::shared_lock guard(shard.mutex);
+		return shard.chunks.contains(p_position);
 	}
 
 	auto find_chunk(const ChunkPosition &p_position) -> ChunkHandle {
-		const std::shared_lock guard(m_directory_mutex);
-		const auto iterator = m_chunks.find(p_position);
-		if (iterator == m_chunks.end())
+		Shard &shard = shard_for(p_position);
+		const std::shared_lock guard(shard.mutex);
+		const auto iterator = shard.chunks.find(p_position);
+		if (iterator == shard.chunks.end())
 			return ChunkHandle{ nullptr };
 		if constexpr (is_shared)
 			return iterator->second;
@@ -81,9 +106,10 @@ public:
 	}
 
 	auto find_chunk(const ChunkPosition &p_position) const -> ConstChunkHandle {
-		const std::shared_lock guard(m_directory_mutex);
-		const auto iterator = m_chunks.find(p_position);
-		if (iterator == m_chunks.end())
+		const Shard &shard = shard_for(p_position);
+		const std::shared_lock guard(shard.mutex);
+		const auto iterator = shard.chunks.find(p_position);
+		if (iterator == shard.chunks.end())
 			return ConstChunkHandle{ nullptr };
 		if constexpr (is_shared)
 			return iterator->second;
@@ -92,28 +118,37 @@ public:
 	}
 
 	auto chunk(const ChunkPosition &p_position) -> ChunkType & {
-		const std::unique_lock guard(m_directory_mutex);
-		const auto [iterator, inserted] = m_chunks.try_emplace(p_position);
+		Shard &shard = shard_for(p_position);
+		const std::unique_lock guard(shard.mutex);
+		const auto [iterator, inserted] = shard.chunks.try_emplace(p_position);
 		if (inserted)
 			iterator->second = make_stored_chunk();
 		return *iterator->second;
 	}
 
 	auto remove_chunk(const ChunkPosition &p_position) -> bool {
-		const std::unique_lock guard(m_directory_mutex);
-		return m_chunks.erase(p_position) != 0;
+		Shard &shard = shard_for(p_position);
+		const std::unique_lock guard(shard.mutex);
+		return shard.chunks.erase(p_position) != 0;
 	}
 
 	auto chunk_count() const -> size {
-		const std::shared_lock guard(m_directory_mutex);
-		return m_chunks.size();
+		size total = 0;
+		for (const auto &shard : m_shards) {
+			const std::shared_lock guard(shard.value.mutex);
+			total += shard.value.chunks.size();
+		}
+		return total;
 	}
 
 	template <typename Visitor>
 	auto for_each_chunk(Visitor &&p_visitor) -> void {
-		const std::shared_lock guard(m_directory_mutex);
-		for (auto &[position, stored_chunk] : m_chunks)
-			p_visitor(position, *stored_chunk);
+		std::array<std::shared_lock<std::shared_mutex>, shard_count> guards;
+		for (size i = 0; i < shard_count; ++i)
+			guards[i] = std::shared_lock(m_shards[i].value.mutex);
+		for (auto &shard : m_shards)
+			for (auto &[position, stored_chunk] : shard.value.chunks)
+				p_visitor(position, *stored_chunk);
 	}
 
 	/// @brief Pointer to the hot attribute at `p_world`, or `nullptr`.

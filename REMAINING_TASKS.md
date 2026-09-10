@@ -71,10 +71,10 @@ Design: `ARCHITECTURE_SPEC.md` §2. Plan (with decisions D1–D11):
 - [x] **T7** — `ARCHITECTURE_SPEC` §2 / §1.4 / §1.5 rewritten; suite 32/32,
       format clean, demo unchanged.
 
-Remaining thread-safety follow-ups moved to the backlog below: thread-safe chunk
-*unload*, world-directory sharding, CAS single-writer seqlock claim, and the
-seqlock memory-model question (benign-race hot path vs. `std::atomic_ref`, for a
-TSan-clean Linux build).
+Thread-safety follow-ups since resolved (backlog below): thread-safe chunk
+*unload* (opt-in `ChunkStorage::Shared`), the seqlock memory model (D3 —
+`std::atomic_ref` is now the default), and world-directory sharding (D5 — done).
+Still deferred: the CAS single-writer seqlock claim (D4).
 
 ---
 
@@ -156,18 +156,17 @@ Design decisions D1–D10 (from the design review) and their triggers are in
       `docs/benchmarks/RESULTS-2026-09-10-i7-14700HX.md`. Linux CI `Benchmarks`
       workflow runs the mixed workload under TSan + ASan — **clean**. The D3/D4/D5
       verdicts below are now settled.
-- [ ] **Adopt `CELLULOSE_STRICT_ATOMICS` as the default (D3 — verdict: yes).**
-      B2 showed it is ≈free on the pure-read (meshing) path and the TSan run
-      confirms it makes the layer race-free. **Breaking:** a `write_hot` closure
-      must then assign whole elements, not fields. Flip the CMake option default,
-      rename the opt-out to `CELLULOSE_LOOSE_ATOMICS`, changelog it, drop the
-      `#ifndef` guard on the torn-read test (it becomes moot).
-- [ ] **Shard the `World` directory (D5 — verdict: yes).** B4: pure-lookup
-      throughput doesn't scale past ~1 useful thread (single `shared_mutex`
-      reader-count line), and one concurrent streamer cuts 8-thread lookups ~5×
-      with tens-of-ms tail latency (4 streamers ~14×). Shard `m_chunks` by
-      `ChunkPosition` hash bits — N independent `{shared_mutex, sub-map}`;
-      `for_each_chunk` locks all N.
+- [x] **`CELLULOSE_STRICT_ATOMICS` is the default now (D3 — verdict: yes).**
+      `chunk.hpp` auto-defines it unless `CELLULOSE_LOOSE_ATOMICS` is set;
+      CMake option renamed to `CELLULOSE_LOOSE_ATOMICS` (default OFF); the
+      torn-read stress tests (`test_chunk.cpp`, `bench_seqlock`) are now
+      `#ifdef CELLULOSE_LOOSE_ATOMICS`; benchmarks TSan job drops the redundant
+      flag. A `write_hot` closure must assign whole elements.
+- [x] **`World` directory is sharded (D5 — verdict: yes).** `world.hpp`: 16
+      power-of-two hash-bit shards, each a `Padded<{ shared_mutex, sub-map }>`;
+      `has_chunk` / `find_chunk` / `chunk` / `remove_chunk` touch one shard;
+      `for_each_chunk` locks all 16 shared (index order), `chunk_count` sums.
+      Local B4 re-run: lookups/s now scale 12M→57M over 1→16 queriers (was flat).
 - [ ] **CAS single-writer seqlock (D4 — verdict: defer).** B1/B7: writer-vs-writer
       contention is real but modest (writes/s −30% from 1→4 writers; p99 to ~33 µs)
       — not urgent. The ~160 B/chunk saving from dropping the per-tier `std::mutex`

@@ -83,10 +83,12 @@ target_link_libraries(${LIBRARY_NAME}
 
 # Instrumentation / variant flags for the benchmarks (and TSan). Default OFF.
 option(CELLULOSE_SEQLOCK_STATS "Give SeqLock a retry counter (benchmark instrument)" OFF)
-option(CELLULOSE_STRICT_ATOMICS "Access the hot tier via std::atomic_ref — no benign race, TSan-clean" OFF)
+# The hot tier is std::atomic_ref-accessed (TSan-clean) by default; opt back into
+# the faster plain-array benign race with this.
+option(CELLULOSE_LOOSE_ATOMICS "Access the hot tier via a benign data race instead of std::atomic_ref" OFF)
 target_compile_definitions(${LIBRARY_NAME} INTERFACE
     $<$<BOOL:${CELLULOSE_SEQLOCK_STATS}>:CELLULOSE_SEQLOCK_STATS>
-    $<$<BOOL:${CELLULOSE_STRICT_ATOMICS}>:CELLULOSE_STRICT_ATOMICS>
+    $<$<BOOL:${CELLULOSE_LOOSE_ATOMICS}>:CELLULOSE_LOOSE_ATOMICS>
 )
 
 if(CELLULOSE_BUILD_DEMO)
