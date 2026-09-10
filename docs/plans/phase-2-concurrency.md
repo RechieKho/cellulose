@@ -181,6 +181,11 @@ After Phase 1 the data structures are correct but single-threaded:
       an assert trips.
 - [ ] GREEN + Commit: "Add `RWLock` (shared_mutex) primitive for the sparse tier."
 
+> **Execution note:** T6 is done **before** T5. Adding a `std::mutex` /
+> `std::shared_mutex` to `Chunk` makes it non-movable, which the value-storing
+> `unordered_dense::map` cannot hold — so `World` must move to `unique_ptr`
+> storage first.
+
 ## Task 5 — Embed locks in `Chunk` + functor accessors
 
 **Files:** `inc/cellulose/chunk.hpp`, `tests/test_chunk.cpp` (append),

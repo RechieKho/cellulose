@@ -45,6 +45,24 @@ TEST_CASE("for_each_chunk visits every chunk once") {
 	CHECK(visited == 3);
 }
 
+TEST_CASE("chunk pointers survive many inserts and an unrelated removal") {
+	cellulose::World<> world;
+
+	auto *first_chunk = &world.chunk(ChunkPosition{ 0, 0, 0 });
+	auto *first_cell = &first_chunk->hot_attribute(cellulose::LocalPosition{ 0, 0, 0 });
+
+	for (cellulose::i32 i = 1; i < 800; ++i) {
+		world.chunk(ChunkPosition{ i, 0, 0 });
+		first_chunk->hot_attribute(cellulose::LocalPosition{ 0, 0, 0 }).block_id =
+				static_cast<cellulose::BlockID>(i);
+	}
+	world.remove_chunk(ChunkPosition{ 400, 0, 0 });
+
+	CHECK(&world.chunk(ChunkPosition{ 0, 0, 0 }) == first_chunk);
+	CHECK(&first_chunk->hot_attribute(cellulose::LocalPosition{ 0, 0, 0 }) == first_cell);
+	CHECK(first_cell->block_id == static_cast<cellulose::BlockID>(799));
+}
+
 TEST_CASE("find_hot_attribute resolves a world position through its chunk") {
 	cellulose::World<> world;
 
