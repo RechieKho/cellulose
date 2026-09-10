@@ -1,6 +1,7 @@
 #include <doctest/doctest.h>
 
 #include <cellulose/sync.hpp>
+
 #include <cstddef>
 #include <mutex>
 #include <utility>
