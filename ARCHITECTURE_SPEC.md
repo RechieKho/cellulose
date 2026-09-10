@@ -278,11 +278,15 @@ in the core — the demo (`src/main.cpp`) does the `ChunkMesh → raylib::Mesh` 
 differences stay visible; `HotCellAttribute` pitch/yaw orientation bits are not
 consumed yet (cubes only).
 
+The apron sampler (and `raycast` / `move_aabb`) walk cells through
+`impl::ChunkCursor` (`cursor.hpp`), which caches the current chunk pointer so a
+run of same-chunk cells costs one `find_chunk` / directory-lock, not one per cell.
+
 **Deferred:** ambient occlusion; texture-atlas UV mapping (`block_id → atlas
 rect`); non-cube block shapes (orientation bits); transparent / cutout pass;
 incremental remesh + per-chunk mesh cache; LOD seam stitching; threaded meshing
-(the mesher already only needs seqlock read access). Also: the apron sampler does
-one `find_chunk` per cell — cache the ≤27 touched chunk pointers.
+(the mesher already only needs seqlock read access); a bulk per-chunk `read_hot`
+copying a local sub-range in one seqlock acquisition.
 
 ---
 

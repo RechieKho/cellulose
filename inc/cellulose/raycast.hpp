@@ -3,6 +3,7 @@
 
 #include "cell.hpp"
 #include "coordinate.hpp"
+#include "cursor.hpp"
 #include "morton.hpp"
 #include "types.hpp"
 #include "vector.hpp"
@@ -40,14 +41,10 @@ auto raycast(WorldType &p_world, const Ray &p_ray, f64 p_max_distance, Predicate
 	if (direction == Vec3d{ 0, 0, 0 })
 		return std::nullopt;
 
+	impl::ChunkCursor cursor(p_world);
 	const auto solid_at = [&](const WorldPosition &p_cell) -> bool {
-		const auto *chunk = p_world.find_chunk(to_chunk_position(p_cell));
-		if (chunk == nullptr)
-			return false;
-		const LocalPosition local = to_local_position(p_cell);
-		const auto snapshot = chunk->read_hot(
-				[&](const auto &p_hot) { return p_hot[encode_cell_index(local)]; });
-		return p_is_solid(snapshot);
+		const auto snapshot = cursor.hot(p_cell);
+		return snapshot.has_value() && p_is_solid(*snapshot);
 	};
 
 	WorldPosition cell = to_cell(p_ray.origin);

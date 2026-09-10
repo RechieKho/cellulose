@@ -154,15 +154,16 @@ sampler chunk-pointer caching.
       element access to `std::atomic_ref` and benchmark the cost.
 - [ ] **CAS single-writer seqlock** (deferred from Phase 2). Replace the per-tier
       writer `std::mutex` with a CAS-claimed writer slot if profiling shows it hot.
-- [ ] **`BlockRegistryBuilder::build()` bug** (pre-existing). `build()` pre-sizes
-      `Store` to N default blocks then `push_back`s N more, and fills
-      `name_id_map` with indices 0..N-1 while the real blocks land at N..2N-1.
-      Blocks a `BlockRegistry`-backed solidity predicate for spatial queries.
-- [ ] **Spatial-query performance** (deferred from Phase 3). `raycast` and the
-      `for_each_cell_in_*` queries do a `find_chunk` (+ directory shared-lock)
-      per cell. Cache the current `Chunk*` and re-resolve only when crossing a
-      chunk boundary; for volume queries, one bulk `read_hot` per chunk copying
-      the local sub-range.
+- [x] **`BlockRegistryBuilder::build()` bug** (pre-existing) — fixed (reserve +
+      push; ids map to the named blocks); `test_block.cpp` added. Unblocks a
+      `BlockRegistry`-backed solidity predicate.
+- [~] **Spatial-query performance** (from Phase 3). `raycast`, `move_aabb` and
+      the mesher's apron sampler now walk cells through `impl::ChunkCursor`
+      (`cursor.hpp`) — one `find_chunk` / directory-lock per chunk crossing
+      instead of per cell (full-chunk LOD-5 mesh test: 0.29 s → 0.06 s).
+      `for_each_cell_in_aabb` was already chunk-major. Still open: a **bulk
+      per-chunk `read_hot`** for volume/mesh copying the local sub-range in one
+      seqlock acquisition instead of one per cell.
 - [ ] **Continuous collision** (deferred from Phase 3). `move_aabb` is exact per
       axis but resolves axes in a fixed X→Y→Z order; add conservative
       advancement / a swept test for fast diagonal movers if needed.
@@ -173,8 +174,7 @@ sampler chunk-pointer caching.
       from `HotCellAttribute` pitch/yaw; a transparent / cutout pass; dirty-flag
       incremental remesh + a per-`ChunkPosition` mesh cache; LOD seam stitching
       (skirts / transition cells between adjacent levels); run `mesh_chunk` on a
-      worker pool; cache the ≤27 chunk pointers the apron sampler touches instead
-      of a `find_chunk` per cell.
+      worker pool. (Apron `find_chunk`-per-cell is fixed — see `ChunkCursor`.)
 - [ ] **Move the demo's `ChunkMesh → raylib::Mesh` bridge** into an optional
       `cellulose/raylib.hpp` (guarded, opt-in) if consumers want it — currently
       it lives only in `src/main.cpp`.

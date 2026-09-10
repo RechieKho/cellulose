@@ -4,6 +4,7 @@
 #include "cell.hpp"
 #include "chunk.hpp"
 #include "coordinate.hpp"
+#include "cursor.hpp"
 #include "morton.hpp"
 #include "types.hpp"
 #include "vector.hpp"
@@ -203,17 +204,7 @@ auto sample_chunk(WorldType &p_world, const ChunkPosition &p_chunk, i32 p_level,
 	const i64 origin_y = static_cast<i64>(p_chunk.y) * static_cast<i64>(chunk_edge_length);
 	const i64 origin_z = static_cast<i64>(p_chunk.z) * static_cast<i64>(chunk_edge_length);
 
-	const auto sample_cell = [&](const WorldPosition &p_cell, bool &p_solid, cellulose::HotCellAttribute &p_attribute) {
-		const auto *chunk = p_world.find_chunk(to_chunk_position(p_cell));
-		if (chunk == nullptr) {
-			p_solid = false;
-			return;
-		}
-		const LocalPosition local = to_local_position(p_cell);
-		p_attribute = chunk->read_hot(
-				[&](const auto &p_hot) { return p_hot[encode_cell_index(local)]; });
-		p_solid = p_is_solid(p_attribute);
-	};
+	ChunkCursor cursor(p_world);
 
 	for (i32 x = -1; x <= n; ++x)
 		for (i32 y = -1; y <= n; ++y)
@@ -233,12 +224,10 @@ auto sample_chunk(WorldType &p_world, const ChunkPosition &p_chunk, i32 p_level,
 								origin_y + static_cast<i64>(y) * block + dy,
 								origin_z + static_cast<i64>(z) * block + dz
 							};
-							bool solid = false;
-							cellulose::HotCellAttribute attribute{};
-							sample_cell(cell, solid, attribute);
-							if (solid) {
+							const auto snapshot = cursor.hot(cell);
+							if (snapshot.has_value() && p_is_solid(*snapshot)) {
 								found_solid = true;
-								representative = attribute;
+								representative = *snapshot;
 							}
 						}
 

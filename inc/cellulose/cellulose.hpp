@@ -6,6 +6,7 @@
 #include "chunk.hpp"
 #include "collision.hpp"
 #include "coordinate.hpp"
+#include "cursor.hpp"
 #include "inspect.hpp"
 #include "mesh.hpp"
 #include "morton.hpp"

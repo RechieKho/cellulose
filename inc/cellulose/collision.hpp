@@ -4,6 +4,7 @@
 #include "cell.hpp"
 #include "chunk.hpp"
 #include "coordinate.hpp"
+#include "cursor.hpp"
 #include "morton.hpp"
 #include "types.hpp"
 #include "vector.hpp"
@@ -24,17 +25,6 @@ struct CollisionMove final {
 
 namespace impl {
 
-template <typename WorldType, typename Predicate>
-auto collision_cell_is_solid(WorldType &p_world, const WorldPosition &p_cell, Predicate &p_is_solid) -> bool {
-	const auto *chunk = p_world.find_chunk(to_chunk_position(p_cell));
-	if (chunk == nullptr)
-		return false;
-	const LocalPosition local = to_local_position(p_cell);
-	const auto snapshot = chunk->read_hot(
-			[&](const auto &p_hot) { return p_hot[encode_cell_index(local)]; });
-	return p_is_solid(snapshot);
-}
-
 /// @brief Sweep `p_box` by `p_delta` along `p_axis` only. Returns the permitted
 /// signed travel (clamped toward zero); sets `p_hit` when a solid stopped it.
 template <typename WorldType, typename Predicate>
@@ -45,6 +35,12 @@ auto collision_sweep_axis(WorldType &p_world, const Aabb &p_box, size p_axis, f6
 
 	const size axis_b = (p_axis + 1) % 3;
 	const size axis_c = (p_axis + 2) % 3;
+
+	ChunkCursor cursor(p_world);
+	const auto cell_is_solid = [&](const WorldPosition &p_cell) {
+		const auto snapshot = cursor.hot(p_cell);
+		return snapshot.has_value() && p_is_solid(*snapshot);
+	};
 
 	const auto cell_lo = [](f64 p_value) { return static_cast<i64>(std::floor(p_value)); };
 	const auto cell_hi = [](f64 p_value) { return static_cast<i64>(std::ceil(p_value)) - 1; };
@@ -67,7 +63,7 @@ auto collision_sweep_axis(WorldType &p_world, const Aabb &p_box, size p_axis, f6
 				coordinate[axis_b] = b;
 				coordinate[axis_c] = c;
 				const WorldPosition cell{ coordinate[0], coordinate[1], coordinate[2] };
-				if (!collision_cell_is_solid(p_world, cell, p_is_solid))
+				if (!cell_is_solid(cell))
 					continue;
 
 				const f64 allowed = p_delta > 0.0
