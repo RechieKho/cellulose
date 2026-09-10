@@ -47,25 +47,29 @@ Suite after close-out: **21/21** green; configure + build warning-free for
 
 ---
 
-## Phase 2 — Concurrency & Thread Safety — **planned, not started**
+## Phase 2 — Concurrency & Thread Safety — **complete**
 
-Design: `ARCHITECTURE_SPEC.md` §2. Full plan (with decisions D1–D11):
+Design: `ARCHITECTURE_SPEC.md` §2. Plan (with decisions D1–D11):
 `docs/plans/phase-2-concurrency.md`.
 
-- [x] Write the Phase 2 implementation plan.
-- [ ] **T1** — `Threads::Threads` link + `CELLULOSE_SANITIZER` (TSan) build option.
-- [ ] **T2** — `sync.hpp`: `cache_line_size` constant + `Padded<T>` helper.
-- [ ] **T3** — `SeqLock` primitive (optimistic reads, retry loop) + stress test.
-- [ ] **T4** — `RWLock` primitive (`std::shared_mutex` wrapper) for the sparse tier.
-- [ ] **T5** — embed hot/cold seqlocks + sparse rwlock in `Chunk`; `alignas`;
-      functor accessors (`read_hot` / `write_hot` / …) alongside the bare ones.
-- [ ] **T6** — `World`: store chunks behind `unique_ptr` (fixes C1 — stable across
-      insert *and* erase), guard the directory with a `shared_mutex`, add a
-      functor `with_hot_attribute`.
-- [ ] **T7** — docs + full suite sweep (plain + TSan green).
+- [x] Phase 2 implementation plan.
+- [x] **T1** — `Threads::Threads` link + `CELLULOSE_SANITIZER` build option
+      (`/fsanitize=` on MSVC, `-fsanitize=` elsewhere; TSan is Linux/macOS only).
+- [x] **T2** — `sync.hpp`: `cache_line_size` + `Padded<T>`.
+- [x] **T3** — `SeqLock` primitive + torn-read stress test.
+- [x] **T4** — `RWLock` primitive + grow-under-read stress test.
+- [x] **T5** — `Chunk` embeds a hot/cold `SeqLock` (+ writer mutex) each and a
+      sparse `RWLock`, `alignas(cache_line_size)`, padded; `read_*`/`write_*`
+      functor accessors added alongside the (now unsynchronised) bare ones.
+- [x] **T6** — `World` stores `unique_ptr<Chunk>` (C1 resolved) under a directory
+      `std::shared_mutex`.
+- [x] **T7** — `ARCHITECTURE_SPEC` §2 / §1.4 / §1.5 rewritten; suite 32/32,
+      format clean, demo unchanged.
 
-Deferred out of Phase 2 (see plan): thread-safe chunk *unload* under live
-readers; sharded / lock-free world directory; CAS single-writer seqlock claim.
+Remaining thread-safety follow-ups moved to the backlog below: thread-safe chunk
+*unload*, world-directory sharding, CAS single-writer seqlock claim, and the
+seqlock memory-model question (benign-race hot path vs. `std::atomic_ref`, for a
+TSan-clean Linux build).
 
 ---
 
@@ -122,3 +126,9 @@ Design: `ARCHITECTURE_SPEC.md` §4.
 - [ ] **World directory scaling** (deferred from Phase 2). If the single
       `shared_mutex` over the chunk map contends under many loader threads, shard
       by hash bits or move to a concurrent map. Measure first.
+- [ ] **Seqlock memory model** (deferred from Phase 2). `Chunk::read_hot` /
+      `read_cold` read the plain arrays under the seqlock — a benign race that
+      ThreadSanitizer will flag. For a TSan-clean Linux build, switch the hot/cold
+      element access to `std::atomic_ref` and benchmark the cost.
+- [ ] **CAS single-writer seqlock** (deferred from Phase 2). Replace the per-tier
+      writer `std::mutex` with a CAS-claimed writer slot if profiling shows it hot.

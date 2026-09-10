@@ -99,11 +99,18 @@ for indices produced by `encode_cell_index` from an in-range `LocalPosition`.
 
 | Member (+ const overload) | Purpose |
 |---------------------------|---------|
-| `hot_attribute(LocalPosition) -> HotCellAttribute&` | address by 3D position (Morton-encoded internally) |
-| `hot_attribute(CellIndex) -> HotCellAttribute&` | address by raw Morton index |
-| `fill_hot(const HotCellAttribute&)` | set every cell |
-| `packed() -> PackedCollection&` | cold-tier SoA collection |
-| `sparse() -> SparseCollection&` | freezing-cold sparse collection |
+| `read_hot(fn) const` / `write_hot(fn)` | run `fn` over the hot `std::array` under the hot seqlock — **the concurrent path** |
+| `read_cold(fn) const` / `write_cold(fn)` | run `fn` over the packed collection under the cold seqlock |
+| `read_sparse(fn) const` / `write_sparse(fn)` | run `fn` over the sparse collection under the sparse `RWLock` |
+| `hot_attribute(LocalPosition\|CellIndex) -> HotCellAttribute&` | address one cell — **unsynchronised**, single-threaded / caller-locked only |
+| `fill_hot(const HotCellAttribute&)` | set every cell — unsynchronised |
+| `packed() -> PackedCollection&` / `sparse() -> SparseCollection&` | direct collection access — unsynchronised |
+
+`Chunk` is `alignas(cache_line_size)` and non-movable (it embeds `std::mutex` /
+`std::shared_mutex`); each of its three lock groups sits on its own cache line,
+clear of the voxel arrays and of each other (§2). A seqlock read functor must
+return a snapshot **by value** — a torn snapshot mid-write is discarded and the
+read retried, which is only sound over the fixed-size hot/cold arrays.
 
 Storage tiers (from `README.md`, keyed by access frequency for 64-byte L1 line
 utilization):
@@ -127,25 +134,25 @@ names `HotCellAttribute` as a type must do the same.
 ### 1.5 World (`world.hpp`)
 
 `World<ChunkType = Chunk<>>` over
-`ankerl::unordered_dense::map<ChunkPosition, ChunkType, ChunkPositionHash>`,
-`final`:
+`ankerl::unordered_dense::map<ChunkPosition, std::unique_ptr<ChunkType>, ChunkPositionHash>`,
+`final`, non-movable:
 
 | Member | Semantics |
 |--------|-----------|
-| `has_chunk(ChunkPosition) const -> bool` | |
-| `find_chunk(ChunkPosition) -> ChunkType*` (+ const) | lookup-only, `nullptr` when absent |
-| `chunk(ChunkPosition) -> ChunkType&` | **get-or-create** (default-constructs via `try_emplace`) |
-| `remove_chunk(ChunkPosition) -> bool` | `true` if a chunk was erased |
-| `chunk_count() const -> size` | |
-| `for_each_chunk(Visitor&&)` | invokes `visitor(const ChunkPosition&, ChunkType&)` |
-| `find_hot_attribute(WorldPosition) -> HotCellAttribute*` (+ const) | resolve through the containing chunk; `nullptr` when that chunk is absent |
+| `has_chunk(ChunkPosition) const -> bool` | shared directory lock |
+| `find_chunk(ChunkPosition) -> ChunkType*` (+ const) | lookup-only, `nullptr` when absent; shared lock; returned pointer stays valid across later inserts/erases |
+| `chunk(ChunkPosition) -> ChunkType&` | **get-or-create** (`make_unique` on miss); exclusive lock |
+| `remove_chunk(ChunkPosition) -> bool` | `true` if erased; exclusive lock; **caller must ensure no other thread is using that chunk** |
+| `chunk_count() const -> size` | shared lock |
+| `for_each_chunk(Visitor&&)` | shared lock for the whole traversal; `visitor(const ChunkPosition&, ChunkType&)` |
+| `find_hot_attribute(WorldPosition) -> HotCellAttribute*` (+ const) | resolve through the containing chunk; `nullptr` when absent — **unsynchronised deref**, single-threaded / caller-locked |
 
-**Known limitation (design-accepted, C1):** `unordered_dense::map` value-stores
-the ~131 KB `Chunk`. Any insert can rehash and move every chunk, invalidating held
-`Chunk*` / `HotCellAttribute*`. The foundation is correct for immediate-use
-access only — **callers must not retain those pointers across inserts.** The
-concurrency subsystem should evaluate `unordered_dense::segmented_map` or
-`unique_ptr<Chunk>` values.
+**C1 — resolved (Phase 2).** Chunks are held behind `std::unique_ptr`, so a
+`ChunkType*` from `find_chunk` / `chunk` stays valid across later directory
+inserts **and** erases — only the pointer slot in the table moves. A
+`std::shared_mutex` guards the directory (the table); per-chunk voxel data has
+its own locks (§2, §1.4). Thread-safe *unload while readers hold a pointer* is
+still deferred — hence the `remove_chunk` contract above.
 
 ### 1.6 Integrated pre-existing primitives
 
@@ -174,32 +181,47 @@ was dropped.)
 
 ---
 
-## 2. Concurrency & Thread Safety — **planned** (`docs/plans/phase-2-concurrency.md`)
+## 2. Concurrency & Thread Safety — **implemented** (plan: `docs/plans/phase-2-concurrency.md`)
 
-Concurrency is managed at the **chunk level** — world-level locking causes severe
-contention; per-block locking needs false-sharing padding around every block at
-unacceptable memory cost. Chunk-level is the balance.
+Concurrency is at the **chunk level** — world-level locking of voxel data causes
+severe contention; per-block locking needs false-sharing padding around every
+block at unacceptable memory cost.
 
-Voxel workloads are read-dominated (meshing, physics, raycasting), so lightweight
-primitives rather than mutexes:
+**Two lock layers, kept distinct:**
 
-- **Sequence locks** for hot & cold data — optimistic unblocked reads, no writer
-  starvation. Safe because the hot and cold arrays are fixed-size, so a
-  concurrent update cannot cause an out-of-bounds error (a torn read is retried).
-- **Read-write locks** for freezing-cold sparse lists — infrequent access keeps
-  writer-starvation risk minimal.
+- **The world directory** — `std::shared_mutex` in `World` over the chunk *table*
+  (pointer slots only). Shared for lookups / iteration, exclusive for load /
+  unload. Brief and O(1), so contention stays low; this is not "world-level
+  voxel locking".
+- **Per-chunk voxel data** — three independent locks inside each `Chunk`, one per
+  storage tier.
 
-False-sharing elimination:
+**Primitives** (`inc/cellulose/`):
 
-- Chunk structures aligned to hardware cache boundaries via `alignas` /
-  `std::hardware_destructive_interference_size`.
-- Internal chunk locks padded to isolate lock-state synchronisation from adjacent
-  voxel data.
+| Header | Type | Used for | Mechanism |
+|--------|------|----------|-----------|
+| `seqlock.hpp` | `SeqLock` | hot tier, cold (packed) tier — one each (`impl::TierLock` = seqlock + writer `std::mutex`) | atomic sequence counter, odd→write→even; readers snapshot-and-retry, never block; writers never starved. Read functor must return **by value**; torn snapshots are discarded. Sound only over the fixed-size arrays. `write()` is not writer-vs-writer safe — the paired `std::mutex` serialises writers. |
+| `rwlock.hpp` | `RWLock` | freezing-cold (sparse) tier | `std::shared_mutex` wrapper; exclusive writes, because the sparse map may reallocate. |
+| `sync.hpp` | `cache_line_size`, `Padded<T>` | false-sharing elimination | `Padded<T>` over-aligns a value to a full cache line. |
 
-The plan also resolves C1 (see §1.5): `World` will store chunks behind
-`std::unique_ptr` so a `Chunk*` stays valid across directory inserts *and*
-erases, with a `std::shared_mutex` guarding the directory itself (distinct from
-the per-chunk voxel-data locks).
+**False-sharing elimination:** `Chunk` is `alignas(cache_line_size)`; each lock
+group is a `Padded<…>` member, so no two locks — and no lock and the voxel
+arrays — share a line.
+
+**Concurrent API:** `Chunk::{read,write}_{hot,cold,sparse}(fn)` run `fn` under the
+matching tier lock (§1.4). `World`'s directory methods take the directory lock
+internally. `World::find_hot_attribute` and `Chunk`'s bare accessors stay
+**unsynchronised** — single-threaded or caller-locked use only.
+
+**Deferred:** reclaiming a chunk while another thread holds a `Chunk*` (thread-safe
+unload); sharding / lock-free world directory; a CAS single-writer seqlock claim
+in place of the writer mutex. See the plan and `REMAINING_TASKS.md`.
+
+**Sanitizers:** `-DCELLULOSE_SANITIZER=<thread|address|undefined>` instruments
+`cellulose_tests`. ThreadSanitizer is Linux/macOS + GCC/Clang only; the dev
+machine's MSVC toolchain gets `address`. The threaded stress tests are written to
+fail (assert/crash) if their synchronisation is removed, which is the portable
+signal.
 
 ---
 
@@ -243,8 +265,15 @@ Three query types:
 | R1 | commits carry the two attribution trailers |
 | R2 | `coordinate.hpp` independent of `chunk.hpp`; literal `5`/`31` + comment |
 | R5 | `ChunkPositionHash` may use `unordered_dense::detail::wyhash` |
-| C1 | chunk pointers/refs are invalidated by `World` inserts — do not retain them |
+| C1 | **resolved** — `World` stores `unique_ptr<Chunk>`; `Chunk*` is stable across insert + erase |
 | C2 | `cellulose_tests` links raylib transitively though no test uses it |
+| D1 | `World` chunk storage = `unordered_dense::map<…, unique_ptr<Chunk>>` (not `segmented_map` — that is not erase-stable) |
+| D2 | a `std::shared_mutex` guards the `World` directory (table), separate from per-chunk locks |
+| D3–D5 | hot & cold tiers each get a `SeqLock` + a writer `std::mutex`; read functor returns by value |
+| D6 | sparse tier gets an `RWLock` (`std::shared_mutex`) — reallocating storage needs exclusive writes |
+| D7 | functor accessors added **alongside** the bare ones; bare ones stay, unsynchronised |
+| D8–D9 | `cache_line_size` constant; `Chunk` + each lock `alignas`-padded to it |
+| D11 | `remove_chunk` requires caller-guaranteed quiescence (safe unload deferred) |
 
 ## Known follow-ups (cross-cutting, not tied to one subsystem)
 
