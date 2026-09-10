@@ -17,6 +17,7 @@ const std::map<std::string, ScenarioFn> registry{
 	{ "seqlock", cellbench::run_seqlock },
 	{ "rwlock", cellbench::run_rwlock },
 	{ "world", cellbench::run_world },
+	{ "cursor", cellbench::run_cursor },
 };
 
 auto require_release() -> void {

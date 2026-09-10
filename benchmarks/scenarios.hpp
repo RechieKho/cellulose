@@ -29,6 +29,7 @@ auto run_noop(const Config &p_config) -> void; // harness self-test
 auto run_seqlock(const Config &p_config) -> void; // B1, B2
 auto run_rwlock(const Config &p_config) -> void; // B3
 auto run_world(const Config &p_config) -> void; // B4, B5
+auto run_cursor(const Config &p_config) -> void; // B6
 
 } //namespace cellbench
 
