@@ -7,10 +7,12 @@
 #include "coordinate.hpp"
 #include "inspect.hpp"
 #include "morton.hpp"
+#include "raycast.hpp"
 #include "rwlock.hpp"
 #include "seqlock.hpp"
 #include "sync.hpp"
 #include "types.hpp"
+#include "vector.hpp"
 #include "world.hpp"
 
 #endif // CEL_CELLULOSE_HPP
