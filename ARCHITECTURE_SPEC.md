@@ -115,11 +115,17 @@ read retried, which is only sound over the fixed-size hot/cold arrays.
 Storage tiers (from `README.md`, keyed by access frequency for 64-byte L1 line
 utilization):
 
-| Tier | Example | Layout | Backing |
-|------|---------|--------|---------|
-| **Hot** (< 4 bytes, every frame) | meshing flags | AoS, Morton-ordered | `std::array<HotCellAttribute, 32768>` inline (~131 KB) |
-| **Cold** (> 8 bytes, not every frame) | fluid properties | SoA, one Morton array per field | `packed()` collection |
-| **Freezing cold** (very large, rare) | complex tile entities | sparse list | `sparse()` collection |
+| Tier | Access | Element | Layout | Backing |
+|------|--------|---------|--------|---------|
+| **Hot** | every frame (meshing flags) | ≤ 4 bytes | AoS, Morton-ordered | `std::array<HotCellAttribute, 32768>` inline (~131 KB) |
+| **Cold** | often, not per-frame (lighting, fluid level) | ≤ 8 bytes | SoA, one dense `chunk_cell_count` array per field | `packed()` collection |
+| **Freezing cold** | rare (tile entities) | > 8 bytes, or present on few cells | per-cell hash map | `sparse()` collection |
+
+The tier is chosen by **access frequency**; the size bounds are the mechanical
+consequence — a `Packed` field always costs `chunk_cell_count * sizeof(element)`
+(so elements must be small), while `Sparse` only pays for cells that carry the
+attribute. `README.md`'s "> 8 bytes" for cold data is illustrative; the enforced
+split is `Packed` ≤ 8 < `Sparse` (a `static_assert` on each).
 
 **Locked (A8):** no concrete cold/freezing attribute type exists yet — both
 collection type parameters default to the *empty* collection so `Chunk<>` is
@@ -159,7 +165,8 @@ still deferred — hence the `remove_chunk` contract above.
 - `cell.hpp` — `HotCellAttribute` (4-byte AoS element; `u16 state` bit-maps a
   `BlockState`: pitch 2b, yaw 2b, then 2b brightness per face ×6, using Raylib's
   axis convention), `PackedCellAttributeCollection<CellCount, Attributes…>` (SoA,
-  element `sizeof <= 8`), `SparseCellAttributeCollection<Attributes…>`. Both
+  element `sizeof <= 8`), `SparseCellAttributeCollection<Attributes…>` (per-cell
+  map, element `sizeof > 8`). Both
   collections' `get<Attribute>()` return **references** (+ const overload).
 - `block.hpp` — `BlockID = u16`, `Block`, `BlockRegistry`, `BlockBuilder`,
   `BlockRegistryBuilder`, name↔id lookup.
@@ -316,12 +323,10 @@ one `find_chunk` per cell — cache the ≤27 touched chunk pointers.
 
 ## Known follow-ups (cross-cutting, not tied to one subsystem)
 
-- `PackedCellAttributeCollection` requires element `sizeof <= 8`, but the README
-  describes cold data as "> 8 bytes" — reconcile when a concrete cold attribute
-  type is introduced.
 - `HotCellAttribute::get_pitch` / `get_yaw` return values in shifted bit-space
   (consistent with the pre-shifted enum constants) — left as-is.
-- Consider relocating `chunk_edge_length` or adding a coupling `static_assert`
-  once the `coordinate.hpp` ↔ `chunk.hpp` dependency rule (R2) can be revisited.
-- C2: consider a raylib-free core `INTERFACE` target so tests/consumers of the
-  data structures don't pull the renderer.
+- The attribute-tier split is now `Packed` ≤ 8 < `Sparse` (see §1.4); if a
+  concrete cold attribute genuinely needs 8–16 bytes densely, revisit whether
+  `Packed` should allow it or the type should be split.
+
+See `REMAINING_TASKS.md` for the live backlog.

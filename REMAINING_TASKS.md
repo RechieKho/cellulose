@@ -129,9 +129,10 @@ sampler chunk-pointer caching.
       collections default to empty (A8). Lighting introduces a cold attribute;
       tile entities introduce a freezing-cold one. Introduce them with their
       owning subsystem.
-- [ ] **Reconcile cold-data size.** `PackedCellAttributeCollection` requires
-      element `sizeof <= 8`; README describes cold data as "> 8 bytes". Resolve
-      when the first concrete cold type lands.
+- [x] **Reconcile cold-data size.** Tiers are chosen by access frequency; the
+      enforced split is `Packed` ≤ 8 < `Sparse` (`static_assert` on each; Sparse
+      tightened `>= 8` → `> 8`), documented in `ARCHITECTURE_SPEC.md` §1.4. The
+      README's "> 8 bytes" for cold data is illustrative.
 - [x] **C2 — raylib-free core target.** raylib is off the `libcellulose`
       INTERFACE (verified: `cellulose_tests.vcxproj` has zero raylib refs); only
       the demo executable links it.

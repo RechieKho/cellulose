@@ -163,14 +163,18 @@ static_assert(
 		sizeof(HotCellAttribute<>) <= 4,
 		"`HotCellAttribute` must be at most 4 byte to maximize element count per cache line.");
 
-/// @brief  Collection of cell attributes arranged in a contiguous memory (which has good cache spatial locality), and thus required the element to be small (at most 8 bytes) to avoid consuming large memory.
-/// @tparam CellCount The number of cell per attribute.
-/// @tparam ...Attributes The type (or component) that describe a cell's attribute.
+/// @brief Cold-tier storage: one dense `CellCount`-length SoA array per attribute
+/// type. Every cell always costs `sizeof(Attribute)`, so elements must stay small
+/// (≤ 8 bytes) — a larger or rarely-present attribute belongs in
+/// `SparseCellAttributeCollection`. Use this for data touched often but not every
+/// frame across most of the chunk (e.g. lighting, fluid level).
+/// @tparam CellCount The number of cells per attribute.
+/// @tparam ...Attributes The type (or component) that describes a cell's attribute.
 template <size CellCount, typename... Attributes>
 class PackedCellAttributeCollection final {
 	static_assert(
 			((sizeof(Attributes) <= 8) && ...),
-			"Type in `Attributes` must be at most 8 byte. For large element, use `SparseCellAttributeCollection`.");
+			"`PackedCellAttributeCollection` elements must be at most 8 bytes (dense per-cell arrays). Use `SparseCellAttributeCollection` for larger or sparse attributes.");
 
 public:
 	static constexpr size attribute_count = sizeof...(Attributes);
@@ -190,13 +194,15 @@ public:
 	}
 };
 
-/// @brief  Collection of cell attributes sparsely arranged, designed for large elements.
-/// @tparam ...Attributes The type (or component) that describe a cell's attribute.
+/// @brief Freezing-cold-tier storage: a per-cell hash map, so only the cells that
+/// actually carry the attribute cost memory. Use this for large elements
+/// (> 8 bytes) or attributes present on only a few cells (e.g. tile entities).
+/// @tparam ...Attributes The type (or component) that describes a cell's attribute.
 template <typename... Attributes>
 class SparseCellAttributeCollection final {
 	static_assert(
-			((sizeof(Attributes) >= 8) && ...),
-			"Type in `Attributes` must be larger than 8 byte. For small elements, use `PackedCellAttributeCollection`.");
+			((sizeof(Attributes) > 8) && ...),
+			"`SparseCellAttributeCollection` elements must be larger than 8 bytes. Use `PackedCellAttributeCollection` for small dense attributes.");
 
 public:
 	static constexpr size attribute_count = sizeof...(Attributes);
