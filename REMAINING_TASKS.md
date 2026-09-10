@@ -94,17 +94,24 @@ collision, sphere/capsule casts, registry-driven solidity.
 
 ---
 
-## Phase 4 — Rendering Pipeline — **not started**
+## Phase 4 — Rendering Pipeline — **planned, not started**
 
-Design: `ARCHITECTURE_SPEC.md` §4.
+Design: `ARCHITECTURE_SPEC.md` §4. Plan (decisions D1–D11):
+`docs/plans/phase-4-rendering.md`.
 
-- [ ] **Greedy meshing** — generate optimized mesh geometry from chunk voxel
-      data (consumes `HotCellAttribute` orientation/brightness bits).
-- [ ] **Level of Detail** — downsample voxel clusters into macro-blocks; build
-      multiple LODs to extend effective render distance.
-- [ ] Mesh-correctness tests (face count / winding / no cracks between LODs).
-- [ ] Wire a real render demo in `src/main.cpp` (raylib) replacing the stdout demo.
-- [ ] Write the Phase 4 implementation plan before starting.
+- [x] Phase 4 implementation plan.
+- [ ] **T1** — `mesh.hpp`: `MeshVertex` / `ChunkMesh` + `impl::greedy_mesh`
+      (grid-level greedy meshing, hidden-face culling, attribute merge keys).
+- [ ] **T2** — `mesh_chunk(world, chunk_position, is_solid)` — apron sampling
+      via seqlock snapshots + cross-chunk face culling.
+- [ ] **T3** — `mesh_chunk_lod(world, chunk_position, level, is_solid)` —
+      macro-block downsampling (any-solid, first-solid attributes).
+- [ ] **T4** — raylib render demo in `src/main.cpp` (mesh → `Mesh` → `DrawModel`).
+- [ ] **T5** — umbrella + docs + sweep.
+
+Output is renderer-neutral (chunk-local `f32` vertices; raylib stays in the
+demo). Deferrals (see plan): AO, atlas UVs, non-cube blocks, transparency,
+incremental remesh / mesh cache, LOD seam stitching, threaded meshing.
 
 ---
 
