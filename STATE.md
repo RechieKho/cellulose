@@ -175,7 +175,7 @@ stricter. Two classes of thing that bit here and will bite again:
     `(resolved-texture-id, brightness)`, **not** `block_id` — `block_id` is
     carried in a parallel `block_at` array and copied from the run's origin cell.
     `texture_id == 0` is the "unset" sentinel → falls back to `block_id`, so real
-    texture ids start at 1 (and `atlas_builder::strip` reserves row 0).
+    texture ids start at 1 (and `atlas_builder::pack_grid` reserves cell 0).
     `mesh_chunk`'s 4-arg `(is_solid, texture_of)` vs `(has_geometry, is_hidden)`
     overloads are disambiguated by `impl::FaceTextureResolver` (a resolver
     returns exactly `TextureID` from `(attr, i32)`) — don't make a texture

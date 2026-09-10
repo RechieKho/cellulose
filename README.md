@@ -70,9 +70,11 @@ cellulose::ChunkMesh mesh = cellulose::mesh_chunk(
     world, { 0, 0, 0 }, solid, registry, { .ambient_occlusion = true });
 // each vertex now carries `texture_id` and `occlusion`
 
-// build a texture sheet: strip() gives a 1xN grid atlas + the pixel size to blit
+// lay the tiles out in a near-square power-of-two grid; blit your pixels into
+// atlas.rect_of(id) and upload one texture
 const std::array<cellulose::TextureID, 3> ids{ 1, 2, 3 };
-const cellulose::TextureAtlas atlas = cellulose::strip(ids, 16).atlas;
+const cellulose::PackedAtlas sheet = cellulose::pack_grid(ids, /*tile_px*/ 16);
+const cellulose::TextureAtlas &atlas = sheet.atlas;
 ```
 
 `cellulose/raylib.hpp` turns that into a drawable: `to_raylib_mesh(mesh, atlas)`

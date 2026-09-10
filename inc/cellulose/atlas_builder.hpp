@@ -98,19 +98,27 @@ inline auto pack(std::span<const TileSize> p_tiles) -> PackedAtlas {
 	return packed;
 }
 
-/// @brief Lay tiles out as a single vertical column of `p_tile_px`-square cells,
-/// row `n` == texture id `n`. The sheet has `max(p_ids) + 1` rows, so ids need
-/// not be contiguous (and id `0` — the "unset" sentinel — is simply an unused
-/// row). The returned atlas is `Grid` mode (`1 x rows`), so `rect_of(id)` is
-/// row `id`. The consumer blits each tile's pixels into `rect_of(id)`.
-inline auto strip(std::span<const TextureID> p_ids, u32 p_tile_px) -> PackedAtlas {
-	PackedAtlas packed;
-	u32 rows = 1;
+/// @brief Lay `p_tile_px`-square tiles out **row-major in a near-square,
+/// power-of-two grid** — GPUs store and sample a roughly square sheet far better
+/// than a tall 1×N strip (and `GL_MAX_TEXTURE_SIZE` caps a strip's length). Cell
+/// `n` holds texture id `n`, so ids need not be contiguous (id `0`, the "unset"
+/// sentinel, is just an unused cell). The returned atlas is `Grid` mode, so
+/// `rect_of(id)` is cell `(id % columns, id / columns)`; the consumer blits each
+/// tile's pixels there. `columns() == width / p_tile_px`.
+inline auto pack_grid(std::span<const TextureID> p_ids, u32 p_tile_px) -> PackedAtlas {
+	u32 count = 1;
 	for (const TextureID id : p_ids)
-		rows = std::max(rows, id + 1);
-	packed.width = p_tile_px;
+		count = std::max(count, id + 1);
+
+	u32 columns = 1;
+	while (columns * columns < count)
+		columns <<= 1;
+	u32 rows = impl::next_power_of_two((count + columns - 1) / columns);
+
+	PackedAtlas packed;
+	packed.width = columns * p_tile_px;
 	packed.height = rows * p_tile_px;
-	packed.atlas = TextureAtlas::grid(1, rows);
+	packed.atlas = TextureAtlas::grid(columns, rows);
 	return packed;
 }
 

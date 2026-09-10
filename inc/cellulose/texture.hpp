@@ -68,6 +68,11 @@ public:
 
 	auto mode() const -> Mode { return m_mode; }
 
+	/// @brief Grid columns / rows (both `1` outside `Grid` mode; `Layers` reports
+	/// `columns() == layer count`).
+	auto columns() const -> u32 { return m_columns; }
+	auto rows() const -> u32 { return m_rows; }
+
 	/// @brief In `Layers` mode the layer count; in `Grid` mode `columns * rows`;
 	/// in `Explicit` mode the number of rects set.
 	auto count() const -> u32 {

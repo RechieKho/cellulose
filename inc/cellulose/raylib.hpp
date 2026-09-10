@@ -152,7 +152,7 @@ inline auto to_raylib_mesh(const ChunkMesh &p_mesh, const TextureAtlas &p_atlas)
 
 /// @brief Compile the atlas-tiling shader and set its `uTileSize` uniform from
 /// `p_atlas` (the size of one tile in UV space — assumes a uniform grid, which
-/// `TextureAtlas::grid` / `atlas_builder::strip` produce). Free with
+/// `TextureAtlas::grid` / `atlas_builder::pack_grid` produce). Free with
 /// `UnloadShader`.
 inline auto load_atlas_shader(const TextureAtlas &p_atlas) -> Shader {
 	Shader shader = LoadShaderFromMemory(atlas_tiling_vs, atlas_tiling_fs);

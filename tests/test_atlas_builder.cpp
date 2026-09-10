@@ -6,8 +6,8 @@
 #include <vector>
 
 using cellulose::pack;
+using cellulose::pack_grid;
 using cellulose::PackedAtlas;
-using cellulose::strip;
 using cellulose::TextureID;
 using cellulose::TileSize;
 using cellulose::UvRect;
@@ -50,20 +50,39 @@ TEST_CASE("pack of nothing yields a 1x1 sheet") {
 	CHECK(packed.height == 1);
 }
 
-TEST_CASE("strip is a single column with one row per id, sized to max(id) + 1") {
-	const std::array<TextureID, 3> ids{ 1, 2, 3 };
-	const PackedAtlas packed = strip(ids, 16);
-	CHECK(packed.width == 16);
-	CHECK(packed.height == 64); // rows 0..3, id 0 unused
+TEST_CASE("pack_grid lays ids row-major in a near-square power-of-two grid") {
+	const std::array<TextureID, 4> ids{ 1, 2, 3, 4 }; // count = max + 1 = 5
+	const PackedAtlas packed = pack_grid(ids, 16);
 
-	// row id spans v in [id/4, (id+1)/4], full width
+	CHECK(packed.atlas.columns() == 4); // smallest pow2 with c*c >= 5
+	CHECK(packed.atlas.rows() == 2);
+	CHECK(packed.width == 64);
+	CHECK(packed.height == 32);
+
+	// id 1 -> cell (1, 0); id 4 -> cell (0, 1)
 	const UvRect r1 = packed.atlas.rect_of(1);
-	CHECK(r1.u0 == doctest::Approx(0.0f));
-	CHECK(r1.u1 == doctest::Approx(1.0f));
-	CHECK(r1.v0 == doctest::Approx(0.25f));
+	CHECK(r1.u0 == doctest::Approx(0.25f));
+	CHECK(r1.v0 == doctest::Approx(0.0f));
+	CHECK(r1.u1 == doctest::Approx(0.5f));
 	CHECK(r1.v1 == doctest::Approx(0.5f));
 
-	const UvRect r3 = packed.atlas.rect_of(3);
-	CHECK(r3.v0 == doctest::Approx(0.75f));
-	CHECK(r3.v1 == doctest::Approx(1.0f));
+	const UvRect r4 = packed.atlas.rect_of(4);
+	CHECK(r4.u0 == doctest::Approx(0.0f));
+	CHECK(r4.v0 == doctest::Approx(0.5f));
+
+	// every tile is one grid cell, none overlap
+	std::vector<UvRect> rects;
+	for (TextureID id : ids)
+		rects.push_back(packed.atlas.rect_of(id));
+	for (std::size_t i = 0; i < rects.size(); ++i)
+		for (std::size_t j = i + 1; j < rects.size(); ++j)
+			CHECK_FALSE(overlaps(rects[i], rects[j]));
+}
+
+TEST_CASE("pack_grid of a single tile is 1x1") {
+	const std::array<TextureID, 1> ids{ 0 };
+	const PackedAtlas packed = pack_grid(ids, 16);
+	CHECK(packed.width == 16);
+	CHECK(packed.height == 16);
+	CHECK(packed.atlas.columns() == 1);
 }

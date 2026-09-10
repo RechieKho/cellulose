@@ -342,7 +342,7 @@ Consumer-driven, renderer-neutral. Nothing in the core decodes an image.
 | `face_texture(const HotType&, i32)` CPO (`cell.hpp`) | Mesher default when no resolver is passed — `HotCellAttribute` → `block_id`; overload for a custom hot type. |
 | `mesh_chunk(world, cp, is_solid, texture_of)` / `mesh_chunk(world, cp, has_geometry, is_hidden, texture_of)` (+ `_lod`) | Texture-aware entry points. The 4-arg `is_solid + texture_of` form is told apart from `has_geometry + is_hidden` by `impl::FaceTextureResolver` (a resolver returns exactly `TextureID` from `(attr, i32)`). |
 | `UvRect`, `TextureAtlas` (`grid(cols, rows)` / `layers(n)` / explicit `set_rect`) (`texture.hpp`) | `TextureID -> UvRect` map. Sampled by the bridge, never by the mesher. |
-| `TileSize`, `PackedAtlas`, `pack(span<TileSize>)`, `strip(ids, tile_px)` (`atlas_builder.hpp`) | Size-only shelf packer → a `TextureAtlas` + sheet dimensions. `strip` is the 1×N uniform-grid convenience (`max(id)+1` rows). Consumer blits pixels into the rects. |
+| `TileSize`, `PackedAtlas`, `pack(span<TileSize>)`, `pack_grid(ids, tile_px)` (`atlas_builder.hpp`) | `pack` is a size-only shelf packer for mixed sizes → a `TextureAtlas` + sheet dims. `pack_grid` is the uniform-tile convenience: a **near-square power-of-two** grid (GPU-friendly; a 1×N strip wastes texture cache and hits `GL_MAX_TEXTURE_SIZE`), id `n` at cell `(n % columns, n / columns)`. Consumer blits pixels into the rects. |
 
 **raylib bridge** (`raylib.hpp`, opt-in): `to_raylib_mesh(mesh, atlas)` bakes
 each vertex's tile origin (`atlas.rect_of(texture_id).min`) into `texcoords2`;

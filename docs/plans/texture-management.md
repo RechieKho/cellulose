@@ -203,9 +203,11 @@ where `TileSize{ TextureID id; u32 w, h; }` and `PackedAtlas` holds a
 `TextureAtlas` + sheet `w/h`. Shelf packer (~90 LOC). The consumer allocates a
 `w × h` image, blits each tile's pixels into `rect_of(id)`, uploads it once.
 
-`strip(ids, tile_px)` is the uniform-grid convenience — a `1 × N` `TextureAtlas`
-(`Grid` mode) plus the `tile_px × (N·tile_px)` sheet size — the layout the demo
-builds procedurally.
+`pack_grid(ids, tile_px)` is the uniform-tile convenience — a **near-square
+power-of-two** `TextureAtlas` (`Grid` mode) plus the sheet size, id `n` at cell
+`(n % columns, n / columns)`. (Originally shipped as a `1 × N` `strip`, replaced
+2026-09-10: GPUs sample and cache a square sheet better and a strip hits
+`GL_MAX_TEXTURE_SIZE`.) The demo builds this layout procedurally.
 
 The library never sees a pixel.
 
@@ -216,7 +218,7 @@ The library never sees a pixel.
 Blocks get textures through `BlockBuilder`: grass =
 `.texture_column(grass_top, grass_side, dirt)`, dirt / stone = `.texture_all(...)`.
 The demo builds a tiny procedural atlas `Image` in code (no checked-in asset)
-from `strip(ids, 16)`, `LoadTextureFromImage`, `load_atlas_shader` +
+from `pack_grid(ids, 16)`, `LoadTextureFromImage`, `load_atlas_shader` +
 `load_atlas_material`, meshes with the `BlockRegistry` resolver,
 `to_raylib_mesh(mesh, atlas)`. README example gains a few lines showing
 `BlockBuilder::texture_column` + the textured `mesh_chunk` overload.
@@ -231,7 +233,7 @@ from `strip(ids, 16)`, `LoadTextureFromImage`, `load_atlas_shader` +
 - `TextureAtlas::grid` rect math (tile 5 of a 4×4 → row 1 col 1; corners
   correct); explicit `set_rect` overrides, unset id reads whole-sheet.
 - `atlas_builder::pack` — no overlaps, everything inside the sheet;
-  `strip(ids, px)` → 1-column, `count*px` tall.
+  `pack_grid(ids, px)` → near-square power-of-two grid, id `n` at `(n%cols, n/cols)`.
 - Mesher: a `column` grass block emits distinct `texture_id` on top / side /
   bottom; a run of identical-texture faces still merges to one quad; two block
   ids sharing a face texture merge.
@@ -245,7 +247,7 @@ from `strip(ids, 16)`, `LoadTextureFromImage`, `load_atlas_shader` +
 | Step | Content | Status |
 |---|---|---|
 | **TX1** | `block.hpp`: `TextureID`, `FaceTextures`, `Block::textures`, `BlockBuilder::texture*()`, `BlockRegistry::face_texture` + resolver. `texture.hpp`: `UvRect`, `TextureAtlas`. Umbrella. Tests. | ✅ `f178b59` |
-| **TX2** | `atlas_builder.hpp`: `TileSize`, `PackedAtlas`, `pack`, `strip`. Umbrella. Tests. | ✅ `f178b59` |
+| **TX2** | `atlas_builder.hpp`: `TileSize`, `PackedAtlas`, `pack`, `pack_grid`. Umbrella. Tests. | ✅ `f178b59` |
 | **TX3** | mesher: `MeshVertex::texture_id`, `MeshSample::texture`, `face_texture` CPO + `impl::sample_face_texture`, resolver overloads (incl. LOD), merge key folds in texture. Tests. | ✅ `f178b59` |
 | **TX4** | `raylib.hpp`: `to_raylib_mesh(mesh, atlas)`, `atlas_tiling_vs` / `_fs`, `load_atlas_shader`, `load_atlas_material`. | |
 | **TX5** | demo: procedural atlas + per-face grass via `BlockBuilder`; README note. | |

@@ -25,7 +25,7 @@ constexpr int chunks = 3; // a `chunks` x `chunks` patch of terrain on the XZ pl
 constexpr int edge = static_cast<int>(cellulose::chunk_edge_length); // 32
 constexpr int tile_px = 16;
 
-// Block ids (index into the registry) and texture ids (row in the atlas strip).
+// Block ids (index into the registry) and texture ids (cells in the atlas grid).
 enum : cellulose::u16 { block_air = 0,
 	block_grass = 1,
 	block_dirt = 2,
@@ -79,13 +79,18 @@ auto set_damage(GameWorld &p_world, const cellulose::WorldPosition &p_cell, cell
 	});
 }
 
-// A 1x5 vertical strip: row `id` is the 16x16 tile for texture id `id`.
-auto build_atlas_image() -> Image {
-	Image image = GenImageColor(tile_px, 5 * tile_px, BLANK);
+// Paint a procedural atlas image matching `p_packed`'s grid — tile id `n` lands
+// in cell `(n % columns, n / columns)`, exactly where `TextureAtlas::rect_of`
+// says it is.
+auto build_atlas_image(const cellulose::PackedAtlas &p_packed) -> Image {
+	Image image = GenImageColor(static_cast<int>(p_packed.width), static_cast<int>(p_packed.height), BLANK);
+	const int columns = static_cast<int>(p_packed.atlas.columns());
 	const auto jitter = [](unsigned char p_channel, int p_delta) {
 		return static_cast<unsigned char>(std::min(255, std::max(0, static_cast<int>(p_channel) + p_delta)));
 	};
 	const auto fill = [&](cellulose::TextureID p_id, Color p_base, int p_cap_rows, Color p_cap) {
+		const int ox = (static_cast<int>(p_id) % columns) * tile_px;
+		const int oy = (static_cast<int>(p_id) / columns) * tile_px;
 		for (int y = 0; y < tile_px; ++y)
 			for (int x = 0; x < tile_px; ++x) {
 				const int n = (x * 7 + y * 13) % 24 - 12; // cheap per-texel noise
@@ -93,7 +98,7 @@ auto build_atlas_image() -> Image {
 				c.r = jitter(c.r, n);
 				c.g = jitter(c.g, n);
 				c.b = jitter(c.b, n);
-				ImageDrawPixel(&image, x, static_cast<int>(p_id) * tile_px + y, c);
+				ImageDrawPixel(&image, ox + x, oy + y, c);
 			}
 	};
 	fill(tex_grass_top, Color{ 96, 172, 72, 255 }, 0, WHITE);
@@ -151,9 +156,10 @@ auto main() -> int {
 	SetTargetFPS(60);
 
 	const std::array<cellulose::TextureID, 4> ids{ tex_grass_top, tex_grass_side, tex_dirt, tex_stone };
-	const cellulose::TextureAtlas atlas = cellulose::strip(ids, tile_px).atlas;
+	const cellulose::PackedAtlas packed = cellulose::pack_grid(ids, tile_px);
+	const cellulose::TextureAtlas &atlas = packed.atlas;
 
-	Image atlas_image = build_atlas_image();
+	Image atlas_image = build_atlas_image(packed);
 	const Texture2D atlas_texture = LoadTextureFromImage(atlas_image);
 	UnloadImage(atlas_image);
 	SetTextureFilter(atlas_texture, TEXTURE_FILTER_POINT);
