@@ -37,6 +37,37 @@ using SparseChunkAttributes = SparseCellAttributeCollection<Attributes...>;
 
 namespace impl {
 
+#ifdef CELLULOSE_STRICT_ATOMICS
+// Under `-DCELLULOSE_STRICT_ATOMICS`, `read_hot` / `write_hot` reach the hot array
+// through these views so every element access is a lock-free `std::atomic_ref`
+// load/store (no data race, TSan-clean) instead of the default benign race. A
+// strict `write_hot` closure must assign **whole elements** (`hot[i] = value`),
+// not fields (`hot[i].field = ...`).
+template <typename T>
+struct AtomicReadView final {
+	const T *base;
+	auto operator[](size p_index) const -> T {
+		return std::atomic_ref<T>(const_cast<T &>(base[p_index])).load(std::memory_order_relaxed);
+	}
+};
+
+template <typename T>
+struct AtomicCellRef final {
+	T *cell;
+	operator T() const { return std::atomic_ref<T>(*cell).load(std::memory_order_relaxed); }
+	auto operator=(const T &p_value) -> AtomicCellRef & {
+		std::atomic_ref<T>(*cell).store(p_value, std::memory_order_relaxed);
+		return *this;
+	}
+};
+
+template <typename T>
+struct AtomicWriteView final {
+	T *base;
+	auto operator[](size p_index) const -> AtomicCellRef<T> { return AtomicCellRef<T>{ base + p_index }; }
+};
+#endif
+
 /// @brief A seqlock plus the mutex that serialises its writers, for one attribute tier.
 ///
 /// `cellulose::` qualification is required: inside `namespace cellulose::impl` the
@@ -98,14 +129,33 @@ public:
 	/// retried. Never index past `chunk_cell_count`.
 	template <typename ReadFn>
 	auto read_hot(ReadFn &&p_read) const {
+#ifdef CELLULOSE_STRICT_ATOMICS
+		static_assert(
+				std::atomic_ref<HotType>::is_always_lock_free,
+				"CELLULOSE_STRICT_ATOMICS requires a lock-free-sized hot attribute type.");
+		return m_hot_lock->sequence.read([&] {
+			const impl::AtomicReadView<HotType> view{ m_hot.data() };
+			return p_read(view);
+		});
+#else
 		return m_hot_lock->sequence.read([&] { return p_read(m_hot); });
+#endif
 	}
 
-	/// @brief Run `p_write(HotStorage &)` as the sole hot-tier writer.
+	/// @brief Run `p_write(HotStorage &)` as the sole hot-tier writer. Under
+	/// `CELLULOSE_STRICT_ATOMICS` the closure receives an atomic write view and
+	/// must assign whole elements (`hot[i] = value`), not fields.
 	template <typename WriteFn>
 	auto write_hot(WriteFn &&p_write) -> void {
 		const std::lock_guard writer_guard(m_hot_lock->writer);
+#ifdef CELLULOSE_STRICT_ATOMICS
+		m_hot_lock->sequence.write([&] {
+			impl::AtomicWriteView<HotType> view{ m_hot.data() };
+			p_write(view);
+		});
+#else
 		m_hot_lock->sequence.write([&] { p_write(m_hot); });
+#endif
 		bump_revision();
 	}
 

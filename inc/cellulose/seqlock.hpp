@@ -34,7 +34,27 @@ class SeqLock final {
 			std::atomic<u64>::is_always_lock_free,
 			"`SeqLock` needs a lock-free 64-bit atomic counter.");
 
+#ifdef CELLULOSE_SEQLOCK_STATS
+	mutable std::atomic<u64> m_retries{ 0 };
+#endif
+
+	auto note_retry() const -> void {
+#ifdef CELLULOSE_SEQLOCK_STATS
+		m_retries.fetch_add(1, std::memory_order_relaxed);
+#endif
+	}
+
 public:
+	/// @brief Retries observed by `read()` since construction. Always 0 unless
+	/// built with `-DCELLULOSE_SEQLOCK_STATS` (a benchmark-only instrument).
+	auto retries() const -> u64 {
+#ifdef CELLULOSE_SEQLOCK_STATS
+		return m_retries.load(std::memory_order_relaxed);
+#else
+		return 0;
+#endif
+	}
+
 	template <typename WriteFn>
 	auto write(WriteFn &&p_write) -> void {
 		const auto start = m_sequence.load(std::memory_order_relaxed);
@@ -71,6 +91,7 @@ public:
 				if (m_sequence.load(std::memory_order_relaxed) == before)
 					return result;
 			}
+			note_retry();
 		}
 	}
 

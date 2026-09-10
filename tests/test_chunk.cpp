@@ -69,7 +69,7 @@ TEST_CASE("functor accessors round-trip each tier under its lock") {
 
 	const auto index = cellulose::encode_cell_index(cellulose::LocalPosition{ 4, 5, 6 });
 
-	chunk.write_hot([&](auto &hot) { hot[index].block_id = 12; });
+	chunk.write_hot([&](auto &hot) { hot[index] = cellulose::HotCellAttribute{ 12, 0 }; });
 	const auto block_id = chunk.read_hot([&](const auto &hot) { return hot[index].block_id; });
 	CHECK(block_id == 12);
 
@@ -92,7 +92,7 @@ TEST_CASE("revision advances on every write and not on reads") {
 	cellulose::Chunk<> chunk;
 	CHECK(chunk.revision() == 0);
 
-	chunk.write_hot([](auto &hot) { hot[0].block_id = 1; });
+	chunk.write_hot([](auto &hot) { hot[0] = cellulose::HotCellAttribute{ 1, 0 }; });
 	const auto after_write = chunk.revision();
 	CHECK(after_write > 0);
 
@@ -104,7 +104,10 @@ TEST_CASE("revision advances on every write and not on reads") {
 }
 
 // The writer keeps block_id == state; a torn read (seen without the seqlock)
-// would pair fields from two different writes.
+// would pair fields from two different writes. Not applicable under
+// CELLULOSE_STRICT_ATOMICS, where the write view only permits whole-element
+// stores (and so cannot tear).
+#ifndef CELLULOSE_STRICT_ATOMICS
 TEST_CASE("concurrent write_hot / read_hot never yields a torn HotCellAttribute") {
 	cellulose::Chunk<> chunk;
 	const auto index = cellulose::encode_cell_index(cellulose::LocalPosition{ 10, 20, 30 });
@@ -142,3 +145,4 @@ TEST_CASE("concurrent write_hot / read_hot never yields a torn HotCellAttribute"
 
 	CHECK(tears.load() == 0);
 }
+#endif // CELLULOSE_STRICT_ATOMICS

@@ -78,6 +78,14 @@ target_link_libraries(${LIBRARY_NAME}
     Threads::Threads
 )
 
+# Instrumentation / variant flags for the benchmarks (and TSan). Default OFF.
+option(CELLULOSE_SEQLOCK_STATS "Give SeqLock a retry counter (benchmark instrument)" OFF)
+option(CELLULOSE_STRICT_ATOMICS "Access the hot tier via std::atomic_ref — no benign race, TSan-clean" OFF)
+target_compile_definitions(${LIBRARY_NAME} INTERFACE
+    $<$<BOOL:${CELLULOSE_SEQLOCK_STATS}>:CELLULOSE_SEQLOCK_STATS>
+    $<$<BOOL:${CELLULOSE_STRICT_ATOMICS}>:CELLULOSE_STRICT_ATOMICS>
+)
+
 add_executable(${EXECUTABLE_NAME} ${SOURCE_FILES})
 target_link_libraries(
     ${EXECUTABLE_NAME}
