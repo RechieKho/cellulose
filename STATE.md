@@ -30,11 +30,15 @@ superpowers plugin were removed / disabled — don't look for them.
 - **All four README subsystems are implemented and tested**: core data structure
   (Phase 1), chunk-level concurrency (Phase 2), spatial querying (Phase 3),
   greedy meshing + LOD (Phase 4). Plus the design follow-ups (extensible hot
-  type, `Chunk::revision`, mesher rule split, opt-in `shared_ptr` chunk storage).
-- **70 tests, all green.** `main` == `origin/main`.
-- Headers (`inc/cellulose/`): `types coordinate morton cell block inspect sync
-  seqlock rwlock chunk world cursor vector raycast volume collision mesh` +
-  `cellulose.hpp` (umbrella) + `raylib.hpp` (opt-in, **not** in the umbrella).
+  type, `Chunk::revision`, mesher rule split, opt-in `shared_ptr` chunk storage)
+  and texture management (per-face `TextureID` on `BlockRegistry`, `texture_id`
+  in the merge key, `TextureAtlas` / `atlas_builder`, raylib atlas-tiling bridge
+  — `docs/plans/texture-management.md`).
+- **84 tests, all green.** `main` == `origin/main`.
+- Headers (`inc/cellulose/`): `types coordinate morton cell block texture
+  atlas_builder inspect sync seqlock rwlock chunk world cursor vector raycast
+  volume collision mesh` + `cellulose.hpp` (umbrella) + `raylib.hpp` (opt-in,
+  **not** in the umbrella).
 
 ---
 
@@ -46,16 +50,18 @@ clang — despite what old notes say). C++20.
 ```sh
 cmake -S . -B build          # ~2-3 min the first time (raylib builds from FetchContent)
 cmake --build build          # incremental builds are seconds
-ctest --test-dir build       # <3 s; 70 cases
+ctest --test-dir build       # <3 s; 84 cases
 ```
 
 - Test binary: `build/tests/<Config>/cellulose_tests.exe`. Demo:
   `build/<Config>/cellulose.exe` (multi-config generator → `Debug/` subdir). The
   demo (`src/main.cpp`) is a **minimal voxel game** — fly camera, LMB break, RMB
-  place — gated behind `CELLULOSE_BUILD_DEMO` (ON by default).
+  place, per-face **textures** via a procedural atlas + the atlas-tiling shader —
+  gated behind `CELLULOSE_BUILD_DEMO` (ON by default).
 - **The demo opens a raylib window and blocks.** To smoke-check in a script:
-  run detached, `sleep 4`, then `taskkill //F //IM cellulose.exe`. Expect
-  `world: 9 chunks generated` on stdout and clean raylib init, no errors.
+  run detached, `sleep 5`, then `taskkill //F //IM cellulose.exe`. Expect
+  `world: 9 chunks generated` on stdout, two custom shaders compiled, 9 meshes
+  uploaded, no GL errors.
   **Stray `cellulose.exe` processes from earlier runs will hold `build/` locked**
   (`rm -rf build` fails "Device or resource busy") — `taskkill //F //IM cellulose.exe` first.
 - CI (`.github/workflows/`) **builds only** on Linux/macOS/Windows and **does not
@@ -160,6 +166,22 @@ stricter. Two classes of thing that bit here and will bite again:
     raylib — only the `cellulose` executable does. Don't add raylib back to the
     INTERFACE target.
 
+13. **Texture ids in the greedy merge key.** `greedy_mesh` keys on
+    `(resolved-texture-id, brightness)`, **not** `block_id` — `block_id` is
+    carried in a parallel `block_at` array and copied from the run's origin cell.
+    `texture_id == 0` is the "unset" sentinel → falls back to `block_id`, so real
+    texture ids start at 1 (and `atlas_builder::strip` reserves row 0).
+    `mesh_chunk`'s 4-arg `(is_solid, texture_of)` vs `(has_geometry, is_hidden)`
+    overloads are disambiguated by `impl::FaceTextureResolver` (a resolver
+    returns exactly `TextureID` from `(attr, i32)`) — don't make a texture
+    resolver return `auto`/`u32`-that-isn't-`TextureID` or it won't be picked.
+
+14. **The atlas bridge is a uniform-grid tiling shader.** `to_raylib_mesh(mesh,
+    atlas)` bakes `atlas.rect_of(texture_id).min` into `texcoords2`; the shader
+    does `origin + fract(tileUV) * uTileSize` with `uTileSize` a single uniform
+    (from `atlas.rect_of(0)` extent). Non-uniform packed atlases need a custom
+    shader. Use `NEAREST` filter + `CLAMP` wrap on the texture.
+
 ---
 
 ## TODOs / backlog
@@ -171,8 +193,6 @@ stricter. Two classes of thing that bit here and will bite again:
   reviews were clean).
 - `ChunkMeshCache` — optional module: dirty set keyed by `ChunkPosition` using
   `Chunk::revision()`, remesh dirty chunks + their 6 face neighbours.
-- Texture-atlas UVs (`block_id → atlas rect`) — needs `Block` to carry texture
-  data first.
 - Bulk per-chunk `read_hot` — one seqlock acquisition + sub-range copy instead of
   per-cell, for `for_each_cell_in_aabb` / the mesher apron.
 - LOD seam stitching (skirts between adjacent-level chunks).

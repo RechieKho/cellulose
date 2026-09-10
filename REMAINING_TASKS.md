@@ -118,9 +118,9 @@ Design: `ARCHITECTURE_SPEC.md` §4. Plan (decisions D1–D11):
 - [x] **T5** — umbrella + `ARCHITECTURE_SPEC` §4 + this file; suite 63/63.
 
 Output is renderer-neutral (chunk-local `f32` vertices; raylib only in the demo).
-Deferrals moved to the backlog: AO, atlas UVs, non-cube blocks, transparency,
-incremental remesh / mesh cache, LOD seam stitching, threaded meshing, apron
-sampler chunk-pointer caching.
+Texture management landed later (see backlog). Remaining deferrals: AO, non-cube
+blocks, transparency, incremental remesh / mesh cache, LOD seam stitching,
+threaded meshing, non-uniform-tile atlas shader.
 
 ---
 
@@ -206,12 +206,20 @@ Design decisions D1–D10 (from the design review) and their triggers are in
       pass plus per-`(block_id, brightness)` masks would erode most of the win.
       The scalar mesher (~block-mesh-rs ballpark) is the deliberate balance. Not
       concurrency-limited — the mesher runs lock-free on a thread-local buffer.
-- [ ] **Other meshing follow-ups:** texture-atlas UVs (`block_id → atlas rect`,
-      needs `Block` texture data); a per-`ChunkPosition` `ChunkMeshCache` using
+- [x] **Texture management — done** (`docs/plans/texture-management.md`).
+      Per-face `TextureID` on `Block` / `BlockRegistry`; `face_texture` CPO;
+      `texture_id` in the greedy merge key + on every `MeshVertex`;
+      `mesh_chunk` / `mesh_chunk_lod` texture-resolver overloads;
+      `TextureAtlas` + `atlas_builder` (`pack` / `strip`); raylib atlas-tiling
+      bridge (`to_raylib_mesh(mesh, atlas)`, `load_atlas_shader` /
+      `load_atlas_material`). Non-uniform-tile atlas support in the shipped
+      shader is deferred (needs per-vertex tile size).
+- [ ] **Other meshing follow-ups:** a per-`ChunkPosition` `ChunkMeshCache` using
       `revision()`; LOD seam stitching (skirts between adjacent levels); run
       `mesh_chunk` on a worker pool; a bulk per-chunk `read_hot` (one seqlock
       acquire + copy instead of per-cell).
 - [x] **`ChunkMesh → raylib::Mesh` bridge** moved to an opt-in
       `cellulose/raylib.hpp` (not in the umbrella; include it with raylib on the
-      link line). `to_raylib_mesh(mesh, color_fn)` + a grayscale default; the demo
-      passes its own palette.
+      link line). `to_raylib_mesh(mesh, color_fn)` + a grayscale default;
+      `to_raylib_mesh(mesh, atlas)` for the textured path; the demo builds a
+      procedural atlas.

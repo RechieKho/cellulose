@@ -275,8 +275,9 @@ Renderer-neutral triangle geometry from chunk voxel data (`mesh.hpp`). No raylib
 in the core. `cellulose/raylib.hpp` is an **opt-in** bridge (not in the umbrella;
 include it with raylib linked): `to_raylib_mesh(ChunkMesh, color_fn) -> Mesh`.
 
-**Output types:** `MeshVertex{ Vec3 position; Vec3 normal; f32 u, v; f32 brightness; u32 block_id; }`
-(positions chunk-local in `[0, chunk_edge_length]`; `u`/`v` are tile-space, `[0, w]×[0, h]`);
+**Output types:** `MeshVertex{ Vec3 position; Vec3 normal; f32 u, v; f32 brightness; u32 block_id; TextureID texture_id; }`
+(positions chunk-local in `[0, chunk_edge_length]`; `u`/`v` are tile-space, `[0, w]×[0, h]`;
+`texture_id` is the render key — see §4.1);
 `ChunkMesh{ vertices, indices }` (index triples, CCW-front).
 
 | Function (`namespace cellulose`) | Behaviour |
@@ -292,9 +293,37 @@ absent neighbour chunk is a default-constructed hot attribute), computing each
 so the culling decision lives where the attributes are, and `greedy_mesh` never
 looks at neighbours.
 
-**Merge key** = `(block_id, that-face's brightness)` (from the `face_brightness`
-CPO; flat for a hot type without it). Cubes only — `HotCellAttribute` pitch/yaw
-orientation bits are unused.
+**Merge key** = `(that-face's texture id, that-face's brightness)` — the texture
+id (`§4.1`), **not** `block_id`, so two blocks that share a face texture merge
+and one block whose faces differ does not. Brightness from the `face_brightness`
+CPO (flat for a hot type without it). Cubes only — `HotCellAttribute` pitch/yaw
+orientation bits are unused. `block_id` on the emitted vertices is the merged
+run's origin cell.
+
+### 4.1 Texture management
+
+Consumer-driven, renderer-neutral. Nothing in the core decodes an image.
+
+| Piece (`namespace cellulose`) | Role |
+|-------------------------------|------|
+| `TextureID` (`= u32`), `FaceTextures{ array<TextureID,6> }` (`block.hpp`) | Per-face texture ids in canonical face order (`+X -X +Y -Y +Z -Z`). `FaceTextures::uniform(id)` / `::column(top, side, bottom)`. `0` = "unset". |
+| `Block::textures`; `BlockBuilder::texture` / `texture_all` / `texture_column` | Assignment lives with the block definition. |
+| `BlockRegistry::face_texture(block, face) -> TextureID`; `BlockRegistry::operator()(attr, face)` | Lookup + a ready-made mesher resolver (pass the registry as `texture_of`). |
+| `face_texture(const HotType&, i32)` CPO (`cell.hpp`) | Mesher default when no resolver is passed — `HotCellAttribute` → `block_id`; overload for a custom hot type. |
+| `mesh_chunk(world, cp, is_solid, texture_of)` / `mesh_chunk(world, cp, has_geometry, is_hidden, texture_of)` (+ `_lod`) | Texture-aware entry points. The 4-arg `is_solid + texture_of` form is told apart from `has_geometry + is_hidden` by `impl::FaceTextureResolver` (a resolver returns exactly `TextureID` from `(attr, i32)`). |
+| `UvRect`, `TextureAtlas` (`grid(cols, rows)` / `layers(n)` / explicit `set_rect`) (`texture.hpp`) | `TextureID -> UvRect` map. Sampled by the bridge, never by the mesher. |
+| `TileSize`, `PackedAtlas`, `pack(span<TileSize>)`, `strip(ids, tile_px)` (`atlas_builder.hpp`) | Size-only shelf packer → a `TextureAtlas` + sheet dimensions. `strip` is the 1×N uniform-grid convenience (`max(id)+1` rows). Consumer blits pixels into the rects. |
+
+**raylib bridge** (`raylib.hpp`, opt-in): `to_raylib_mesh(mesh, atlas)` bakes
+each vertex's tile origin (`atlas.rect_of(texture_id).min`) into `texcoords2`;
+`atlas_tiling_vs` / `atlas_tiling_fs` (GLSL 330) do
+`uv = origin + fract(tileUV) * uTileSize`; `load_atlas_shader(atlas)` sets
+`uTileSize` from the grid; `load_atlas_material(shader, texture)` returns a stock
+`Material`. One 2-D texture, one draw call, greedy merging intact — **no
+`GL_TEXTURE_2D_ARRAY`, no `rlgl`, no platform `#ifdef`**. The shipped shader
+assumes a uniform-grid atlas; non-uniform packed sheets need a custom shader
+(per-vertex tile size). `NEAREST` filter + `CLAMP` wrap; linear/mipmapped
+sampling needs a half-texel inset + `textureGrad`.
 
 The mesher is **scalar by design**. Binary-greedy-meshing (packing 64 cells into
 a `u64` for bit-parallel culling/merging, ~30× faster) needs a linear
@@ -306,9 +335,9 @@ The apron sampler (and `raycast` / `move_aabb`) walk cells through
 `impl::ChunkCursor` (`cursor.hpp`), which caches the current chunk pointer so a
 run of same-chunk cells costs one `find_chunk` / directory-lock, not one per cell.
 
-**Deferred:** ambient occlusion; texture-atlas UV mapping (`block_id → atlas
-rect`); non-cube block shapes (orientation bits); transparent / cutout pass;
-incremental remesh + per-chunk mesh cache; LOD seam stitching; threaded meshing
+**Deferred:** ambient occlusion; non-cube block shapes (orientation bits);
+transparent / cutout pass; incremental remesh + per-chunk mesh cache; LOD seam
+stitching; non-uniform-tile atlas support in the shipped shader; threaded meshing
 (the mesher already only needs seqlock read access); a bulk per-chunk `read_hot`
 copying a local sub-range in one seqlock acquisition.
 
@@ -346,8 +375,10 @@ copying a local sub-range in one seqlock acquisition.
 | §3 | `raycast` = Amanatides & Woo DDA; `move_aabb` = axis-separated swept "collide and slide" |
 | §3 | `vector.hpp` (`Vector3<T>`, `Aabb`) is raylib-free |
 | §4 | mesher output is renderer-neutral (`MeshVertex` / `ChunkMesh`); the raylib bridge is the opt-in `cellulose/raylib.hpp` (not in the umbrella), used only by the demo |
-| §4 | greedy meshing with `(block_id, face-brightness)` merge keys + hidden-face culling; cubes only (orientation bits unused) |
+| §4 | greedy meshing with `(face-texture-id, face-brightness)` merge keys + hidden-face culling; cubes only (orientation bits unused) |
 | §4 | LOD = any-solid macro-cells, first-solid attributes, quads scaled by `1 << level` |
+| §4.1 | textures are consumer-driven: `TextureID` per face on `Block`/`BlockRegistry`, `face_texture` CPO default → `block_id`, `texture_id` in the merge key + on every vertex |
+| §4.1 | atlas rendering = one 2-D sheet + `origin + fract(uv)*tileSize` tiling shader (`raylib.hpp`); `GL_TEXTURE_2D_ARRAY` rejected — no raylib API, forced per-platform raw GL |
 | FD1 | all three attribute tiers are consumer-supplied; `HotAttribute` concept requires only `block_id`; brightness via the `face_brightness` CPO |
 | FD2 | thread-safe unload = opt-in `ChunkStorage::Shared` (`shared_ptr` handles); no epoch/hazard machinery |
 | FD8 | mesher takes `has_geometry` + `is_hidden` (transparency); single-predicate `mesh_chunk` kept as the opaque convenience |

@@ -51,6 +51,32 @@ Every accessor here has a lock-taking counterpart (`read_hot` / `write_hot`,
 `ChunkStorage::Shared`, …) for doing this from worker threads — see
 [`ARCHITECTURE_SPEC.md`](ARCHITECTURE_SPEC.md).
 
+### Textures
+
+Give each block a texture per face and mesh against it — the resolved texture id
+joins the greedy merge key, so faces only merge within one texture:
+
+```cpp
+const auto registry = cellulose::BlockRegistryBuilder()
+    .add_block_builder(cellulose::BlockBuilder("air"))
+    .add_block_builder(cellulose::BlockBuilder("grass")
+        .texture_column(/*top*/ 1, /*side*/ 2, /*bottom*/ 3)) // Minecraft-style
+    .add_block_builder(cellulose::BlockBuilder("dirt").texture_all(3))
+    .build();
+
+// `registry` is itself the resolver — pass it to the mesher
+cellulose::ChunkMesh mesh = cellulose::mesh_chunk(world, { 0, 0, 0 }, solid, registry);
+// each vertex now carries `texture_id`; every quad is one tile
+
+// build a texture sheet: strip() gives a 1xN grid atlas + the pixel size to blit
+const std::array<cellulose::TextureID, 3> ids{ 1, 2, 3 };
+const cellulose::TextureAtlas atlas = cellulose::strip(ids, 16).atlas;
+```
+
+`cellulose/raylib.hpp` turns that into a drawable: `to_raylib_mesh(mesh, atlas)`
+plus `load_atlas_shader(atlas)` / `load_atlas_material(...)` — one 2‑D texture,
+one draw call, and a tiling shader that keeps greedy-merged quads correct.
+
 ## Design and Implementation Strategy
 
 The four core design concerns are:
@@ -108,6 +134,8 @@ To prevent cache invalidation when adjacent memory locations are modified by dif
 ### Rendering Pipeline
 
 The rendering pipeline generates optimized mesh geometry from spatial data using **greedy meshing**. To extend effective render distance efficiently, it constructs multiple **Levels of Detail (LOD)** by downsampling voxel clusters into macro-blocks.
+
+**Texturing** is consumer-driven: blocks carry a texture id per face (`BlockRegistry`), the mesher folds the resolved id into the merge key and onto every vertex, and a renderer-neutral atlas layout (`TextureAtlas` / `atlas_builder`) maps ids to sheet rects. The opt-in raylib bridge draws it from a single 2‑D atlas with an `origin + fract(uv) * tileSize` tiling shader — no texture-array feature, no platform-specific GL.
 
 ## Implementation Status
 
