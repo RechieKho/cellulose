@@ -11,14 +11,18 @@ for the *backlog*, `REMAINING_TASKS.md`; for phase-by-phase rationale,
 
 | File | What |
 |------|------|
-| `README.md` | product pitch + the 4-subsystem design narrative (aspirational; the source spec) |
+| `README.md` | product pitch + the 4-subsystem design narrative + short usage examples |
 | `ARCHITECTURE_SPEC.md` | **as-built** reference — every header, every locked decision, the decision table |
-| `REMAINING_TASKS.md` | live backlog; all 4 phases are `complete`, the rest is cross-cutting |
-| `docs/plans/phase-{2,3,4}-*.md` | the per-phase implementation plans (executed) |
-| `docs/plans/design-followups.md` | the 10 design decisions from the design review + triggers for the deferred ones |
+| `REMAINING_TASKS.md` | live backlog; all 4 phases + every "adopt" verdict are done, the rest is trigger-gated |
+| `docs/plans/phase-{2,3,4}-*.md` | per-phase implementation plans (executed) |
+| `docs/plans/design-followups.md` | the design-review decisions + triggers for the deferred ones |
+| `docs/plans/concurrency-benchmarks.md` | the benchmark plan (executed) |
+| `docs/plans/texture-management.md` | the texture subsystem plan + decisions (executed) |
+| `docs/benchmarks/RESULTS-2026-09-10-i7-14700HX.md` | benchmark numbers + verdicts, with a post-D3/D5 re-run section |
 | `inc/cellulose/*.hpp` | the library (header-only) |
 | `src/main.cpp` | the minimal voxel game demo (the only `.cpp` in `src/`) |
 | `tests/test_*.cpp` | doctest cases, auto-globbed |
+| `benchmarks/` | dependency-free concurrency benchmark harness (opt-in build) |
 
 There is no `CLAUDE.md`; this file is the closest thing. `.superpowers/` and the
 superpowers plugin were removed / disabled — don't look for them.
@@ -29,73 +33,92 @@ superpowers plugin were removed / disabled — don't look for them.
 
 - **All four README subsystems are implemented and tested**: core data structure
   (Phase 1), chunk-level concurrency (Phase 2), spatial querying (Phase 3),
-  greedy meshing + LOD (Phase 4). Plus the design follow-ups (extensible hot
-  type, `Chunk::revision`, mesher rule split, opt-in `shared_ptr` chunk storage,
-  strict atomics + sharded directory from the benchmarks, opt-in ambient
-  occlusion) and texture management (per-face `TextureID` on `BlockRegistry`,
-  `texture_id` in the merge key, `TextureAtlas` / `atlas_builder`, raylib
-  atlas-tiling bridge — `docs/plans/texture-management.md`).
-- **88 tests, all green.** `main` == `origin/main`.
+  greedy meshing + LOD (Phase 4).
+- **Design follow-ups done**: extensible hot type + `HotAttribute` concept,
+  `Chunk::revision()`, mesher rule split (`has_geometry` / `is_hidden`), opt-in
+  `shared_ptr` chunk storage (`ChunkStorage::Shared`), opt-in ambient occlusion,
+  texture management, T-junction welding.
+- **Benchmark verdicts implemented**: strict `atomic_ref` hot tier is the
+  **default** (D3), the `World` directory is **sharded** (D5), `Chunk::snapshot_hot`
+  is the mesher's bulk read.
+- **92 tests, all green.** `main` == `origin/main`. Builds CI green on
+  Linux/macOS/Windows; the `Benchmarks` workflow's TSan + ASan run is clean.
 - Headers (`inc/cellulose/`): `types coordinate morton cell block texture
   atlas_builder inspect sync seqlock rwlock chunk world cursor vector raycast
-  volume collision mesh` + `cellulose.hpp` (umbrella) + `raylib.hpp` (opt-in,
-  **not** in the umbrella).
+  volume collision mesh` + `cellulose.hpp` (umbrella, all of the above) +
+  `raylib.hpp` (opt-in, **not** in the umbrella).
 
 ---
 
 ## Build & run
 
 Default toolchain here is **MSVC `cl.exe` via the Visual Studio generator** (not
-clang — despite what old notes say). C++20.
+clang — despite what old notes say). C++20, multi-config generator.
 
 ```sh
 cmake -S . -B build          # ~2-3 min the first time (raylib builds from FetchContent)
-cmake --build build          # incremental builds are seconds
-ctest --test-dir build       # <3 s; 84 cases
+cmake --build build          # incremental builds are seconds; add --config Release for Release
+ctest --test-dir build       # <4 s; 92 cases
 ```
 
 - Test binary: `build/tests/<Config>/cellulose_tests.exe`. Demo:
-  `build/<Config>/cellulose.exe` (multi-config generator → `Debug/` subdir). The
-  demo (`src/main.cpp`) is a **minimal voxel game** — fly camera, hold-LMB to
-  mine, RMB place, per-face **textures** via a procedural atlas + the atlas-tiling
-  shader, baked **ambient occlusion** (`MeshOptions`), and a **custom cold-tier
-  attribute** (`struct Damage`) via `Chunk<HotCellAttribute, PackedChunkAttributes<Damage>>`
-  + `read_cold` / `write_cold` — gated behind `CELLULOSE_BUILD_DEMO` (ON by default).
-- **The demo opens a raylib window and blocks.** To smoke-check in a script:
-  run detached, `sleep 5`, then `taskkill //F //IM cellulose.exe`. Expect
-  `world: 9 chunks generated` on stdout, two custom shaders compiled, 9 meshes
-  uploaded, no GL errors.
-  **Stray `cellulose.exe` processes from earlier runs will hold `build/` locked**
-  (`rm -rf build` fails "Device or resource busy") — `taskkill //F //IM cellulose.exe` first.
-- CI (`.github/workflows/`) **builds only** on Linux/macOS/Windows and **does not
-  run ctest**. `lint.yml` runs `clang-format` on **`src/**` only**. So a broken
-  test or an `inc/` format slip passes CI — check locally.
+  `build/<Config>/cellulose.exe`.
+- The demo (`src/main.cpp`) is a **minimal voxel game** — fly camera, hold-LMB to
+  mine (a custom cold-tier `Damage` attribute counts hits), RMB place, per-face
+  **textures** from a procedural atlas + the atlas-tiling shader, baked **ambient
+  occlusion** and **T-junction welding** (`MeshOptions`), `FLAG_VSYNC_HINT |
+  FLAG_MSAA_4X_HINT`. Gated behind `CELLULOSE_BUILD_DEMO` (ON by default).
+- **The demo opens a raylib window and blocks.** Smoke-check in a script: run
+  detached, `sleep 5`, then `taskkill //F //IM cellulose.exe`. Expect `world: 9
+  chunks generated` on stdout, custom shaders compiled, 9 meshes uploaded, no GL
+  errors.
+  **Stray `cellulose.exe` from earlier runs holds `build/` locked** (`rm -rf
+  build` → "Device or resource busy") — `taskkill //F //IM cellulose.exe` first.
+- CMake options: `CELLULOSE_BUILD_TESTS` (ON top-level), `CELLULOSE_BUILD_DEMO`
+  (ON), `CELLULOSE_BUILD_BENCHMARKS` (OFF), `CELLULOSE_SANITIZER=<address|thread|
+  undefined>`, `CELLULOSE_LOOSE_ATOMICS` (OFF — see gotcha 5),
+  `CELLULOSE_SEQLOCK_STATS` (OFF — benchmark instrument). Instrumentation flags
+  are `option()`s plumbed via `target_compile_definitions` because a raw `-D...`
+  gets mangled by the MSYS shell (`/D...` → `D:/Programs/Git/D...`).
+
+### CI
+
+`.github/workflows/`:
+- `build_{linux,macos,windows}.yml` — **build only, no ctest**, Release + a
+  debug-ish config, all three platforms. GCC/Clang on Linux/macOS are **LP64**
+  and stricter than MSVC (see below).
+- `lint.yml` — `clang-format` on **`src/**` only**. A broken test or an `inc/` /
+  `tests/` format slip **passes CI** — check locally.
+- `benchmarks.yml` — **`workflow_dispatch` only** (`gh workflow run Benchmarks`).
+  Release timing run + TSan + ASan on the mixed workload with
+  `halt_on_error=1`. The value is the sanitizer run, not the (noisy) numbers.
+  Run it after touching `chunk.hpp` / `seqlock.hpp` / `world.hpp` / `mesh.hpp`.
 
 ### Sanitizers
 
-`-DCELLULOSE_SANITIZER=<address|thread|undefined>` on `cmake` → passes
-`/fsanitize=` (MSVC) or `-fsanitize=` (GCC/Clang) to `cellulose_tests`.
+- **ThreadSanitizer: not on Windows at all.** Linux/macOS + GCC/Clang only — use
+  the `Benchmarks` workflow.
+- **ASan on MSVC** builds and links but the exe won't start without
+  `clang_rt.asan_*.dll` on `PATH` (exits `0xC0000135`, ctest hangs). Treat ASan
+  as a CI/Linux concern.
+- The portable local signal is the threaded **stress tests** — they fail
+  deterministically if you remove the lock they exercise.
 
-- **ThreadSanitizer: not supported on Windows at all.** Only Linux/macOS + GCC/Clang.
-- **ASan on MSVC builds and links, but the exe won't start** without
-  `clang_rt.asan_*.dll` on `PATH` (exits `0xC0000135`, ctest hangs). Needs the
-  MSVC ASan runtime dir on PATH — treat ASan as a CI/Linux concern.
-- The portable signal is the threaded **stress tests** (they fail deterministically
-  if you remove the lock they're testing — verified during Phase 2).
+### GCC / Linux vs MSVC — things that bit and will bite again
 
-### GCC / Linux vs MSVC
-
-The dev machine is MSVC — MSVC is lenient about missing transitive includes and
-some overload resolution. The GitHub Linux/macOS CI (GCC/Clang, **LP64**) is
-stricter. Two classes of thing that bit here and will bite again:
-
-- **`<shared_mutex>` does not pull `<mutex>`** on libstdc++. Any header using
-  `std::unique_lock` / `std::lock_guard` must `#include <mutex>` explicitly.
+- **`<shared_mutex>` does not pull `<mutex>`** on libstdc++. A header using
+  `std::unique_lock` / `std::lock_guard` must `#include <mutex>` itself.
 - **`uint_fast16_t == uint_fast32_t == uint_fast64_t == unsigned long` on LP64
-  Linux** — they collapse. This made `libmorton`'s `uint_fast*`-templated LUT
-  overloads ambiguous, so `libmorton` was **dropped** — `morton.hpp` is now a
-  self-contained magic-bits interleave. Don't reintroduce a `uint_fast*`-heavy
-  templated dependency without checking it on Linux.
+  Linux** — they collapse, which made `libmorton`'s templated LUT overloads
+  ambiguous. `libmorton` was **dropped**; `morton.hpp` is a self-contained
+  magic-bits interleave. Don't reintroduce a `uint_fast*`-heavy templated dep
+  without a Linux check.
+- **`std::hardware_destructive_interference_size`** — GCC warns (`-Winterference-size`)
+  when it's used across TUs, and Apple ARM reports 128. Pinned to
+  `cache_line_size = 64` in `sync.hpp`; don't switch back to the std facility.
+- MSVC is lenient about missing transitive includes and generous overload
+  resolution — a clean local build is not proof CI is clean. New `std::` uses
+  need their own `#include`.
 
 ---
 
@@ -103,147 +126,194 @@ stricter. Two classes of thing that bit here and will bite again:
 
 1. **`impl::` name lookup.** Inside `namespace cellulose::impl`, the bare names
    `SeqLock` / `RWLock` / `Padded` / `HotCellAttribute` bind to the *unspecialised
-   class templates* (`impl::SeqLock` etc.), **not** the `cellulose::` aliases. You
-   must write `cellulose::SeqLock`, `cellulose::HotCellAttribute`, … in `impl`
-   code. This has bitten every phase. Symptom: `C2955 / C7602: use of class
-   template requires template argument list`.
+   class templates* (`impl::SeqLock` …), **not** the `cellulose::` aliases. Write
+   `cellulose::SeqLock`, `cellulose::HotCellAttribute`, … in `impl` code. Has
+   bitten every phase. Symptom: `C2955 / C7602: use of class template requires
+   template argument list`.
 
 2. **doctest test names must not contain `;`.** `doctest_discover_tests` passes
-   names through CMake, which splits on `;` (list separator) → the test silently
-   splits into two entries. Use "and" / "—" instead.
+   names through CMake, which splits on `;` → the case silently registers as two
+   ctest entries. Use "and" / "—".
 
-3. **`Chunk` is non-movable and non-copyable** (it embeds `std::mutex` /
-   `std::shared_mutex` / `std::atomic`). `World` therefore stores
-   `unique_ptr<Chunk>` (default) or `shared_ptr<Chunk>` (`ChunkStorage::Shared`).
-   Any container of `Chunk` by value won't compile.
+3. **`Chunk` is non-movable and non-copyable** (embeds `std::mutex` /
+   `std::shared_mutex` / `std::atomic`). `World` stores `unique_ptr<Chunk>`
+   (default) or `shared_ptr<Chunk>` (`ChunkStorage::Shared`). No container of
+   `Chunk` by value compiles.
 
-4. **`clang-format` include ordering.** `.clang-format` has `IncludeBlocks:
-   Preserve` + `SortIncludes` on. Put the header-under-test in **its own
-   paragraph** right after `<doctest/doctest.h>`, then a blank line, then the rest
-   — otherwise it sorts `<algorithm>` above `<cellulose/foo.hpp>`. Run
-   `clang-format -i` on touched files before committing; only `src/` is CI-gated
-   but keep `inc/` and `tests/` clean.
-   Style: **tabs**, `ColumnLimit: 0` (no wrapping), `{ a, b }` brace spacing,
-   `} //namespace x` closers, trailing return types, `p_`-prefixed params, no
-   `m_` on public members. `.clang-format` says `Standard: c++17` but the code is
-   C++20 (concepts, `std::atomic_ref`, `std::default_initializable`).
+4. **`clang-format`.** `.clang-format`: `IncludeBlocks: Preserve` + `SortIncludes`.
+   Put the header-under-test in its **own paragraph** right after
+   `<doctest/doctest.h>`, blank line, then the rest — otherwise `<algorithm>`
+   sorts above `<cellulose/foo.hpp>`. Run `clang-format -i` on every touched
+   file (`inc/`, `tests/`, `src/`) before committing — only `src/` is CI-gated.
+   Style: **tabs**, `ColumnLimit: 0`, `{ a, b }` brace spacing, `} //namespace x`,
+   trailing return types, `p_`-prefixed params, no `m_` on public members.
+   `.clang-format` says `Standard: c++17` but the code is C++20 (concepts,
+   `std::atomic_ref`, `std::default_initializable`, designated initializers).
 
 5. **Hot tier is `std::atomic_ref` by default** (D3 adopted). `chunk.hpp`
    auto-defines `CELLULOSE_STRICT_ATOMICS` unless `CELLULOSE_LOOSE_ATOMICS` is
-   set. Consequences: a **`write_hot` closure must assign whole elements**
-   (`hot[i] = HotCellAttribute{...}`), never fields (`hot[i].block_id = ...`) —
-   that's a compile error under strict; `read_hot`'s `hot` arg is an
-   `AtomicReadView` (`hot[i]` yields a value, not a reference). `-DCELLULOSE_LOOSE_ATOMICS=ON`
-   restores the old plain-array benign race (faster writes, TSan-flagged, UB) —
-   the torn-read stress tests only compile in that config.
+   set. Consequences:
+   - a **`write_hot` closure must assign whole elements** (`hot[i] =
+     HotCellAttribute{...}`), never fields — a compile error under strict.
+   - `read_hot`'s `hot` arg is an `impl::AtomicReadView` — `hot[i]` yields a
+     **value**, not a reference.
+   - `Chunk::snapshot_hot` under strict is N `atomic_ref` loads, not a `memcpy` —
+     measurably slower than the loose path when a writer is concurrently active
+     (B7: edit-heavy meshing ~10-20% slower). This is the accepted D3 trade for
+     the TSan-clean layer.
+   - `-DCELLULOSE_LOOSE_ATOMICS=ON` restores the plain-array benign race (faster
+     writes, TSan-flagged, UB). The torn-read stress tests (`test_chunk.cpp`,
+     `bench_seqlock`) only compile in that config (`#ifdef CELLULOSE_LOOSE_ATOMICS`).
 
 6. **Custom hot attribute types** must satisfy `concept HotAttribute`:
    `std::is_trivially_copyable_v` + `std::default_initializable` + a `block_id`
-   member convertible to `BlockID`. That's *all* — brightness/orientation are not
-   required; the mesher reads brightness through the `face_brightness(attr, face)`
-   customization point and flat-shades if there's no overload.
+   member convertible to `BlockID`. That's all — brightness / orientation /
+   texture are read through the `face_brightness(attr, face)` and
+   `face_texture(attr, face)` customization points, which flat-shade / fall back
+   to `block_id` when a custom type provides no overload.
 
-7. **`mesh_chunk` / `mesh_chunk_lod` are overloaded on arity.**
-   `mesh_chunk(world, cp, is_solid)` = opaque cubes. `mesh_chunk(world, cp,
-   has_geometry, is_hidden)` = the general form (transparency/cutout). Don't add a
-   defaulted 4th param — it breaks the overload distinction.
+7. **The `mesh_chunk` / `mesh_chunk_lod` overload set is concept-disambiguated.**
+   Every form also takes a **trailing `const MeshOptions & = {}`**. The 4-/5-arg
+   forms are told apart by positive concepts, not arity:
+   - `(world, cp, is_solid)` — opaque cubes.
+   - `(world, cp, is_solid, texture_of)` — `requires FaceTextureResolver<TextureOf>`
+     (the callable returns exactly `TextureID` from `(attr, i32)` — **not** `auto`
+     or a bare `u32`, or overload resolution drops it).
+   - `(world, cp, has_geometry, is_hidden)` — `requires FaceHiddenRule<IsHidden>`
+     (returns `bool`-ish from `(attr, attr)`).
+   - `(world, cp, has_geometry, is_hidden, texture_of)` — both concepts.
+   - `+ MeshOptions` on any of the above.
+   Don't loosen those `requires` clauses — `MeshOptions` in the 4th/5th slot
+   would then be mistaken for an `is_hidden` rule or a resolver → ambiguous.
 
-8. **`PackedCellAttributeCollection<size CellCount, typename... Attributes>`** is
-   the *general* SoA-grid type; `CellCount` can't be defaulted (it precedes the
-   pack). Use the `PackedChunkAttributes<Attributes...>` alias (chunk-sized) when
-   plugging a cold attribute into `Chunk`.
+8. **`impl::face_layout[6]`** (`mesh.hpp`) is the single source of truth for
+   per-face merge/UV axes, texture orientation and triangle winding. Side faces:
+   `v = 0` at world `+Y`, `u` left-to-right viewed from outside, so a column
+   texture (grass side, log) reads upright. `emit_quad` takes a `FaceLayout`;
+   `sample_chunk`'s AO corner sampling reads the same table. Change the
+   convention *there*, never with scattered `(axis+1)%3` arithmetic (that was the
+   original bug — only Z faces got `v = world-Y`).
 
-9. **`coordinate.hpp` must not include `chunk.hpp`.** It exposes
-   `chunk_edge_length_shift` / `chunk_edge_length_mask` (literals `5` / `31`);
-   `chunk.hpp` `static_assert`s they match `chunk_edge_length`. Keep the
-   dependency one-way.
+9. **Greedy merge key = `(resolved-texture-id, brightness [, uniform AO level])`**
+   — **not** `block_id`. `block_id` rides a parallel `block_at` array, copied from
+   the merged run's origin cell. `texture_id == 0` = "unset" → falls back to
+   `block_id`, so real texture ids start at 1 (`atlas_builder::pack_grid` leaves
+   cell 0 unused). AO on: a face with **uniform** corner AO merges within that
+   level; any per-corner variation is emitted as a 1×1 quad and never merges.
 
-10. **`to_chunk_position` narrows to `i32`** — correct only while
-    `|world_axis| < 2^(31 + shift)` (≈ ±2^36 blocks). Fine for any real world;
-    don't be surprised at pathological coordinates.
+10. **`MeshOptions` features are opt-in and geometry-preserving when off.**
+    - `ambient_occlusion`: 0fps corner AO from the 8 in-plane neighbours in the
+      `+normal` layer; occluder test is `has_geometry`; **level-0 meshes only**
+      (`mesh_chunk_lod` ignores it at `level > 0`). `MeshVertex::occlusion` is
+      `1.0` when off.
+    - `weld_t_junctions`: a post-pass over `greedy_mesh`'s output (each quad is
+      exactly **4 vertices + 6 indices** — nothing else appends vertices, so
+      `vertices[4k..4k+3]` is quad `k`). Splits every quad edge carrying another
+      quad's vertex; re-fans split quads **from the polygon centroid** (a corner
+      fan slivers a split edge); unsplit quads keep their original triangulation
+      (AO flip included); compacts to referenced vertices. The demo also enables
+      MSAA for the residual sub-pixel aliasing.
 
-11. **Line endings.** `git config core.autocrlf = true` here → git warns "LF will
-    be replaced by CRLF" on every commit touching a text file. Harmless; the repo
-    stores LF.
+11. **`PackedCellAttributeCollection<size CellCount, typename... Attributes>`** —
+    `CellCount` can't be defaulted (precedes the pack). Use the
+    `PackedChunkAttributes<Attributes...>` alias (chunk-sized) when plugging a
+    cold attribute into `Chunk`. `SparseChunkAttributes<...>` for the freezing
+    tier. Packed elements must be ≤ 8 bytes, sparse > 8 (`static_assert`ed).
 
-12. **`raylib.hpp` is not in the umbrella** and includes `<raylib.h>`. Only
+12. **`coordinate.hpp` must not include `chunk.hpp`.** It exposes
+    `chunk_edge_length_shift` / `chunk_edge_length_mask` (literals `5` / `31`);
+    `chunk.hpp` `static_assert`s they match `chunk_edge_length`. Dependency stays
+    one-way.
+
+13. **`to_chunk_position` narrows to `i32`** — exact only while `|world_axis| <
+    2^(31 + shift)` (≈ ±2^36 blocks). Fine for any real world.
+
+14. **`World` directory is sharded** — `shard_count = 16` (`world.hpp`), routed
+    by `ChunkPositionHash & 15`, each shard a `Padded<{ shared_mutex, sub-map }>`.
+    `has_chunk` / `find_chunk` / `chunk` / `remove_chunk` touch one shard.
+    `for_each_chunk` and `chunk_count` lock **all** shards (shared, in index
+    order) — so a `for_each_chunk` visitor that calls back into `world.chunk()`
+    **deadlocks** (same hazard as the old single mutex). D5 re-run: lookups now
+    scale ~12M→48M over 1-16 threads.
+
+15. **`raylib.hpp` is not in the umbrella** and includes `<raylib.h>`. Only
     `src/main.cpp` uses it. `libcellulose` (the INTERFACE lib) does **not** link
-    raylib — only the `cellulose` executable does. Don't add raylib back to the
-    INTERFACE target.
+    raylib — only the `cellulose` executable does.
 
-13. **Texture ids in the greedy merge key.** `greedy_mesh` keys on
-    `(resolved-texture-id, brightness)`, **not** `block_id` — `block_id` is
-    carried in a parallel `block_at` array and copied from the run's origin cell.
-    `texture_id == 0` is the "unset" sentinel → falls back to `block_id`, so real
-    texture ids start at 1 (and `atlas_builder::pack_grid` reserves cell 0).
-    `mesh_chunk`'s 4-arg `(is_solid, texture_of)` vs `(has_geometry, is_hidden)`
-    overloads are disambiguated by `impl::FaceTextureResolver` (a resolver
-    returns exactly `TextureID` from `(attr, i32)`) — don't make a texture
-    resolver return `auto`/`u32`-that-isn't-`TextureID` or it won't be picked.
+16. **The atlas bridge assumes a uniform-grid atlas.** `to_raylib_mesh(mesh,
+    atlas)` bakes `atlas.rect_of(texture_id).min` into `texcoords2`; the shipped
+    shader does `origin + fract(tileUV) * uTileSize` with `uTileSize` a single
+    uniform from `atlas.rect_of(0)`'s extent. Non-uniform packed sheets
+    (`atlas_builder::pack`) need a custom shader with per-vertex tile size. Use
+    `NEAREST` filter + `CLAMP` wrap. `GL_TEXTURE_2D_ARRAY` was rejected — raylib
+    has no API for it and it forced per-platform raw GL.
 
-14. **The atlas bridge is a uniform-grid tiling shader.** `to_raylib_mesh(mesh,
-    atlas)` bakes `atlas.rect_of(texture_id).min` into `texcoords2`; the shader
-    does `origin + fract(tileUV) * uTileSize` with `uTileSize` a single uniform
-    (from `atlas.rect_of(0)` extent). Non-uniform packed atlases need a custom
-    shader. Use `NEAREST` filter + `CLAMP` wrap on the texture.
+17. **`atlas_builder::pack_grid(ids, tile_px)`** lays uniform tiles into a
+    **near-square power-of-two** grid (`columns` = smallest pow2 with `c² ≥
+    max(id)+1`), id `n` at cell `(n % columns, n / columns)`. `pack(span<TileSize>)`
+    is the shelf packer for mixed sizes → explicit rects. `TextureAtlas` has
+    `columns()` / `rows()` / `count()` / `rect_of(id)` and three modes
+    (`grid` / `layers` / explicit). (A `1×N strip` was the original design —
+    replaced; GPUs sample a square sheet better and a strip hits `GL_MAX_TEXTURE_SIZE`.)
 
-15. **`World` directory is sharded** (`shard_count = 16`, `world.hpp`). Single-shard
-    ops route by `ChunkPositionHash & 15`; `for_each_chunk` / `chunk_count` touch
-    all shards — `for_each_chunk` holds `shard_count` shared locks at once, so a
-    visitor that calls back into `world.chunk()` deadlocks (same hazard as the
-    old single mutex). `sample_chunk` reads the centre chunk via one
-    `Chunk::snapshot_hot` and the apron via `ChunkCursor` — two paths on purpose.
+18. **Line endings.** `core.autocrlf = true` here → git warns "LF will be
+    replaced by CRLF" on every text-file commit. Harmless; the repo stores LF.
 
-16b. **`impl::face_layout[6]`** is the single source of truth for per-face merge
-    axes, texture orientation (side faces: `v=0` at world `+Y`, `u` left-to-right
-    from outside) and triangle winding. `emit_quad` takes a `FaceLayout`;
-    `sample_chunk`'s AO corner sampling reads the same table. Change the
-    convention *there*, not in scattered `(axis+1)%3` arithmetic.
+---
 
-16. **`MeshOptions`** is the trailing arg on every `mesh_chunk` / `mesh_chunk_lod`
-    — `{ .ambient_occlusion, .weld_t_junctions }`, both opt-in, both leave
-    geometry byte-identical when off. Adding it forced positive concept
-    constraints — `impl::FaceHiddenRule` on the `(has_geometry, is_hidden)`
-    overloads and `impl::FaceTextureResolver` on the both-rules-plus-texture ones
-    — so `MeshOptions` in the 4th/5th slot isn't mistaken for an `is_hidden` or a
-    resolver. Don't remove those constraints. AO: level-0 only, occluder test is
-    `has_geometry`. `weld_t_junctions`: a post-pass over `greedy_mesh`'s output
-    (quads are 4 verts + 6 indices), **centroid** fan on split quads (a corner
-    fan slivers), unsplit quads verbatim; the demo also sets
-    `FLAG_VSYNC_HINT | FLAG_MSAA_4X_HINT` (tearing + silhouette aliasing).
+## The mesher, in one place (`inc/cellulose/mesh.hpp`)
+
+It has accreted; this is the map.
+
+- **`MeshVertex`** = `{ Vec3 position; Vec3 normal; f32 u, v; f32 brightness;
+  u32 block_id; TextureID texture_id; f32 occlusion; }`. `operator==` covers all
+  fields — a full-vertex compare in a test breaks when a field is added (none do
+  today). Positions are chunk-local `[0, chunk_edge_length]`, integer-valued.
+- **`MeshOptions`** = `{ bool ambient_occlusion; bool weld_t_junctions; }` —
+  gotcha 7, 10.
+- **`greedy_mesh(samples, size, block_scale, ao=false, weld=false)`** — public,
+  tests call it directly. 0fps greedy meshing over a `MeshSample` grid; emits via
+  `impl::emit_quad`; calls `impl::weld_t_junctions` at the end when asked.
+- **`impl::sample_chunk<World, HasGeometry, IsHidden, TextureOfPtr>`** — builds
+  the `n³ + apron` grid: one `Chunk::snapshot_hot` of the centre chunk (the bulk
+  of the reads), `impl::ChunkCursor` per-cell for the 1-cell apron. Fills
+  `visible` / `brightness` / `texture` / `face_occlusion` per face.
+- **`impl::mesh_chunk_impl`** — the shared body all public overloads funnel into;
+  threads `p_options.ambient_occlusion` / `.weld_t_junctions` through.
+- **`face_texture` / `face_brightness` CPOs** (`cell.hpp`) — customization points,
+  default to `block_id` / flat.
+- **`BlockRegistry` is itself a `texture_of` resolver** — pass the registry
+  directly as the 4th arg to `mesh_chunk`.
+- **`impl::FaceTextureResolver` / `impl::FaceHiddenRule`** — the disambiguating
+  concepts (gotcha 7).
 
 ---
 
 ## TODOs / backlog
 
-`REMAINING_TASKS.md` is authoritative. Summary of what's *actionable* vs *parked*:
+`REMAINING_TASKS.md` is authoritative. Everything with an "adopt" / "yes" verdict
+is **done**. What's left is trigger-gated:
 
-**Actionable, no blocker:**
-- Phase 1 close-out: a consolidated whole-branch review (optional — per-task
-  reviews were clean).
-- `ChunkMeshCache` — optional module: dirty set keyed by `ChunkPosition` using
-  `Chunk::revision()`, remesh dirty chunks + their 6 face neighbours.
-- LOD seam stitching (skirts between adjacent-level chunks).
-- Threaded meshing (`mesh_chunk` on a worker pool — read side is already
-  lock-light via `Chunk::snapshot_hot`).
+**Deferred by decision — do NOT start without the trigger** (`docs/plans/design-followups.md`):
+- **D4** CAS single-writer seqlock (drop the per-tier `std::mutex`) — trigger: a
+  world-gen profile showing writer-vs-writer contention. (B1/B7: ~30% at 4
+  writers, mild.) The ~160 B/chunk saving is the stronger motive.
+- **Generational chunk handle** (replace `shared_ptr` under `ChunkStorage::Shared`)
+  — trigger: streaming engines adopting `Shared` widely (B5: ~25-30% lookup cost).
+- **D10** `sweep_aabb` (continuous collision) + sphere/capsule casts — trigger: a
+  real use for fast movers / shape casts.
 
-**Adopted from the benchmark verdicts:** D3 (strict `atomic_ref` hot tier — now
-the default, gotcha 5) and D5 (sharded `World` directory — `world.hpp`,
-`shard_count` shards).
+**Optional modules — self-contained, build on demand:**
+- `ChunkMeshCache` — dirty set keyed by `ChunkPosition` on `Chunk::revision()`,
+  remesh dirty chunks + their 6 face neighbours.
+- **LOD seam stitching** — skirts between adjacent *LOD levels*. Distinct from
+  `MeshOptions::weld_t_junctions`, which already welds intra-level T-junctions.
+- Threaded meshing — `mesh_chunk` on a worker pool. The read side is already
+  lock-light (`snapshot_hot`).
+- A "casts AO" predicate distinct from `has_geometry` (e.g. glass doesn't occlude).
 
-**Decided, deferred — do NOT start without the trigger** (see
-`docs/plans/design-followups.md`):
-- D4 CAS single-writer seqlock (drop the per-tier `std::mutex`) — trigger: a
-  profile showing the writer mutex is hot.
-- Generational chunk handle (replace `shared_ptr` under `ChunkStorage::Shared`) —
-  trigger: streaming engines adopting `Shared` widely (B5: ~25% lookup cost).
-- D10 `sweep_aabb` (continuous collision) + sphere/capsule casts — trigger: an
-  actual use for fast movers / shape casts.
-- D6 ambient occlusion — if built, it's an opt-in flag with AO in the merge key,
-  never default. Otherwise it's the consumer's concern.
-
-**Won't do:** D7 non-cube block shapes / a block-model system — that belongs in
-the consumer's engine, not a voxel library.
+**Won't do:** D7 non-cube block-model system (engine territory); bitwise/SIMD
+greedy meshing (would break the Morton layout that serves spatial queries).
 
 ---
 
@@ -251,12 +321,12 @@ the consumer's engine, not a voxel library.
 
 - `HotCellAttribute::get_pitch()` / `get_yaw()` return values in *shifted
   bit-space* (matching the pre-shifted `Pitch` / `Yaw` enum constants), not
-  `0..3`. The face-brightness getters *were* buggy the same way — those are fixed;
-  pitch/yaw are intentionally left.
+  `0..3`. The face-brightness getters were buggy the same way — fixed; pitch/yaw
+  intentionally left.
 - Several classes have an empty `private:` immediately followed by `public:`
   (`HotCellAttribute`, `BlockBuilder`, …) — harmless, original style.
 - `inspect.hpp`'s `group_inspect` / `IsInspect` is heavy variadic
   metaprogramming; `BlockRegistry::inspect_block` / `inspect_blocks` are the only
-  users. `BlockRegistryBuilder::build()` had a real bug (double-filled the store)
-  — fixed this session (`test_block.cpp`).
+  users. `BlockRegistryBuilder::build()` had a real double-fill bug — fixed
+  (`test_block.cpp`).
 - `types.hpp` defines `in` / `un` (for `int` / `unsigned int`) — unused so far.
