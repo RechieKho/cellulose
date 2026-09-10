@@ -150,24 +150,31 @@ Design decisions D1–D10 (from the design review) and their triggers are in
       stores `shared_ptr<Chunk>`; `find_chunk` returns a handle that pins the
       chunk past `remove_chunk`. `Unique` (raw ptr, caller-quiescence) stays the
       default. **Decided against** epoch / hazard-pointer reclamation for the base.
-- [ ] **Concurrency benchmarks.** Plan: `docs/plans/concurrency-benchmarks.md`.
-      A dependency-free `benchmarks/` harness (asymmetric reader/writer roles,
-      fixed-wall-time, latency histogram) covering the seqlock, the sparse
-      `RWLock`, the `World` directory, `ChunkStorage::Shared` overhead,
-      `ChunkCursor`, and an end-to-end "meshing while editing" workload. Produces
-      the numbers that gate D3 / D4 / D5 below.
-- [ ] **Seqlock memory model (D3) — decided, deferred.** Keep the benign-race
-      fast path; add a `std::atomic_ref` element path selectable at compile time
-      (`CELLULOSE_STRICT_ATOMICS`, auto-on under `__SANITIZE_THREAD__`).
-      **Trigger:** benchmark B2 — if strict-atomics costs < ~5% on the read path,
-      make it the default; else a need for TSan-clean CI.
-- [ ] **CAS single-writer seqlock (D4) — decided, deferred.** Fold the writer
-      claim into the sequence counter's low bit (CAS `even → odd`), dropping the
-      per-tier `std::mutex` (~160 B/chunk). **Trigger:** benchmark B1/B7 showing
-      writes/s collapses as writer threads scale.
-- [ ] **World directory scaling (D5) — decided, deferred.** Shard the chunk map
-      by `ChunkPosition` hash bits. **Trigger:** benchmark B4 showing lookups/s
-      plateaus / lookup p99 spikes as query threads scale.
+- [x] **Concurrency benchmarks.** `benchmarks/` (dependency-free harness) with
+      scenarios B1–B7; plan `docs/plans/concurrency-benchmarks.md`, first results
+      `docs/benchmarks/RESULTS-2026-09-10-i7-14700HX.md`. Linux CI `Benchmarks`
+      workflow runs the mixed workload under TSan + ASan — **clean**. The D3/D4/D5
+      verdicts below are now settled.
+- [ ] **Adopt `CELLULOSE_STRICT_ATOMICS` as the default (D3 — verdict: yes).**
+      B2 showed it is ≈free on the pure-read (meshing) path and the TSan run
+      confirms it makes the layer race-free. **Breaking:** a `write_hot` closure
+      must then assign whole elements, not fields. Flip the CMake option default,
+      rename the opt-out to `CELLULOSE_LOOSE_ATOMICS`, changelog it, drop the
+      `#ifndef` guard on the torn-read test (it becomes moot).
+- [ ] **Shard the `World` directory (D5 — verdict: yes).** B4: pure-lookup
+      throughput doesn't scale past ~1 useful thread (single `shared_mutex`
+      reader-count line), and one concurrent streamer cuts 8-thread lookups ~5×
+      with tens-of-ms tail latency (4 streamers ~14×). Shard `m_chunks` by
+      `ChunkPosition` hash bits — N independent `{shared_mutex, sub-map}`;
+      `for_each_chunk` locks all N.
+- [ ] **CAS single-writer seqlock (D4 — verdict: defer).** B1/B7: writer-vs-writer
+      contention is real but modest (writes/s −30% from 1→4 writers; p99 to ~33 µs)
+      — not urgent. The ~160 B/chunk saving from dropping the per-tier `std::mutex`
+      is the better motivation. Revisit if a world-gen profile shows it hot.
+- [ ] **Lighter chunk handle (from B5).** `ChunkStorage::Shared` costs ~25% on
+      `find_chunk` (shared_ptr refcount). Fine as an opt-in; if streaming engines
+      adopt it widely, design a generational handle (`{slot, generation}` +
+      `resolve`) instead of `shared_ptr`.
 - [x] **`BlockRegistryBuilder::build()` bug** (pre-existing) — fixed (reserve +
       push; ids map to the named blocks); `test_block.cpp` added. Unblocks a
       `BlockRegistry`-backed solidity predicate.
