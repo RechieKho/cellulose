@@ -150,17 +150,24 @@ Design decisions D1–D10 (from the design review) and their triggers are in
       stores `shared_ptr<Chunk>`; `find_chunk` returns a handle that pins the
       chunk past `remove_chunk`. `Unique` (raw ptr, caller-quiescence) stays the
       default. **Decided against** epoch / hazard-pointer reclamation for the base.
+- [ ] **Concurrency benchmarks.** Plan: `docs/plans/concurrency-benchmarks.md`.
+      A dependency-free `benchmarks/` harness (asymmetric reader/writer roles,
+      fixed-wall-time, latency histogram) covering the seqlock, the sparse
+      `RWLock`, the `World` directory, `ChunkStorage::Shared` overhead,
+      `ChunkCursor`, and an end-to-end "meshing while editing" workload. Produces
+      the numbers that gate D3 / D4 / D5 below.
 - [ ] **Seqlock memory model (D3) — decided, deferred.** Keep the benign-race
       fast path; add a `std::atomic_ref` element path selectable at compile time
-      (auto-on under `__SANITIZE_THREAD__`). **Trigger:** a microbenchmark of the
-      meshing hot path showing the cost is acceptable, or a need for TSan-clean CI.
+      (`CELLULOSE_STRICT_ATOMICS`, auto-on under `__SANITIZE_THREAD__`).
+      **Trigger:** benchmark B2 — if strict-atomics costs < ~5% on the read path,
+      make it the default; else a need for TSan-clean CI.
 - [ ] **CAS single-writer seqlock (D4) — decided, deferred.** Fold the writer
       claim into the sequence counter's low bit (CAS `even → odd`), dropping the
-      per-tier `std::mutex` (~160 B/chunk). **Trigger:** a profile showing the
-      writer mutex is hot.
+      per-tier `std::mutex` (~160 B/chunk). **Trigger:** benchmark B1/B7 showing
+      writes/s collapses as writer threads scale.
 - [ ] **World directory scaling (D5) — decided, deferred.** Shard the chunk map
-      by `ChunkPosition` hash bits. **Trigger:** a profile showing directory-mutex
-      contention under many loader threads.
+      by `ChunkPosition` hash bits. **Trigger:** benchmark B4 showing lookups/s
+      plateaus / lookup p99 spikes as query threads scale.
 - [x] **`BlockRegistryBuilder::build()` bug** (pre-existing) — fixed (reserve +
       push; ids map to the named blocks); `test_block.cpp` added. Unblocks a
       `BlockRegistry`-backed solidity predicate.
