@@ -55,9 +55,11 @@ ctest --test-dir build       # <3 s; 84 cases
 
 - Test binary: `build/tests/<Config>/cellulose_tests.exe`. Demo:
   `build/<Config>/cellulose.exe` (multi-config generator → `Debug/` subdir). The
-  demo (`src/main.cpp`) is a **minimal voxel game** — fly camera, LMB break, RMB
-  place, per-face **textures** via a procedural atlas + the atlas-tiling shader —
-  gated behind `CELLULOSE_BUILD_DEMO` (ON by default).
+  demo (`src/main.cpp`) is a **minimal voxel game** — fly camera, hold-LMB to
+  mine, RMB place, per-face **textures** via a procedural atlas + the atlas-tiling
+  shader, and a **custom cold-tier attribute** (`struct Damage`) via
+  `Chunk<HotCellAttribute, PackedChunkAttributes<Damage>>` +
+  `read_cold` / `write_cold` — gated behind `CELLULOSE_BUILD_DEMO` (ON by default).
 - **The demo opens a raylib window and blocks.** To smoke-check in a script:
   run detached, `sleep 5`, then `taskkill //F //IM cellulose.exe`. Expect
   `world: 9 chunks generated` on stdout, two custom shaders compiled, 9 meshes

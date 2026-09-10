@@ -2,12 +2,13 @@
 
 `cellulose` is a performant C++ voxel library providing spatial data structures and operations for Minecraft-style voxel engines under concurrent settings.
 
-## Example — break and place blocks
+## Example — a minimal voxel game
 
 The core of a Minecraft-style edit loop is three calls: `raycast` to find the
 targeted block, a `hot_attribute` write to change it, and `mesh_chunk` to rebuild
 the render mesh. `src/main.cpp` is the full playable version (raylib window, fly
-camera); this is the substance:
+camera, per-face textures, a custom cold-tier attribute for mining); this is the
+substance:
 
 ```cpp
 #include <cellulose/cellulose.hpp>
@@ -76,6 +77,33 @@ const cellulose::TextureAtlas atlas = cellulose::strip(ids, 16).atlas;
 `cellulose/raylib.hpp` turns that into a drawable: `to_raylib_mesh(mesh, atlas)`
 plus `load_atlas_shader(atlas)` / `load_atlas_material(...)` — one 2‑D texture,
 one draw call, and a tiling shader that keeps greedy-merged quads correct.
+
+### Custom cell attributes
+
+The **hot** tier ships (`HotCellAttribute` — block id + per-face state). The
+**cold** and **freezing** tiers are yours: pick the types, and each chunk stores
+one dense SoA array (cold, elements ≤ 8 bytes) or a sparse per-cell map
+(freezing) for them. Add a byte of mining progress:
+
+```cpp
+struct Damage { cellulose::u8 hits = 0; };  // your own attribute type
+
+using GameChunk = cellulose::Chunk<
+    cellulose::HotCellAttribute,
+    cellulose::PackedChunkAttributes<Damage>>;   // cold tier = { Damage }
+cellulose::World<GameChunk> world;
+
+const auto index = cellulose::encode_cell_index(cellulose::to_local_position(cell));
+auto *chunk = world.find_chunk(cellulose::to_chunk_position(cell));
+
+// read + write it under the cold-tier lock (functor accessors run your closure)
+cellulose::u8 hits = chunk->read_cold([&](const auto &cold) {
+    return cold.template get<Damage>()[index].hits;
+});
+chunk->write_cold([&](auto &cold) { cold.template get<Damage>()[index].hits = hits + 1; });
+```
+
+`src/main.cpp` uses exactly this for its hold-to-mine mechanic.
 
 ## Design and Implementation Strategy
 

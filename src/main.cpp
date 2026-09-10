@@ -1,7 +1,8 @@
-// A minimal voxel game on top of `cellulose` — fly around, break blocks with the
-// left mouse button, place them with the right. The whole "engine" is:
+// A minimal voxel game on top of `cellulose` — fly around, hold LMB to mine a
+// block, RMB to place one. The whole "engine" is:
 //   * a `cellulose::World` holding the blocks,
 //   * a `cellulose::BlockRegistry` mapping block ids to per-face textures,
+//   * a custom cold-tier cell attribute (`Damage`) for mining progress,
 //   * `cellulose::raycast` to find the block under the crosshair,
 //   * `cellulose::mesh_chunk` to (re)build each chunk's render mesh after an edit,
 //   * `cellulose::to_raylib_mesh` + the atlas-tiling shader to draw it.
@@ -15,6 +16,7 @@
 #include <cellulose/raylib.hpp>
 #include <cmath>
 #include <iostream>
+#include <optional>
 
 namespace {
 
@@ -32,9 +34,48 @@ enum : cellulose::TextureID { tex_grass_top = 1,
 	tex_dirt = 3,
 	tex_stone = 4 };
 
+// --- extending the cell with a custom attribute -----------------------------
+// The hot tier is shipped (`HotCellAttribute` — block id + per-face state). The
+// cold and freezing tiers are consumer-defined: you pick the types and cellulose
+// stores one dense SoA array (cold) / a sparse map (freezing) per chunk. Here we
+// add a single cold-tier byte: how far mined the block is.
+struct Damage final {
+	cellulose::u8 hits = 0;
+};
+
+// A chunk whose cold tier is exactly `{ Damage }`; freezing tier left empty.
+using GameChunk = cellulose::Chunk<
+		cellulose::HotCellAttribute,
+		cellulose::PackedChunkAttributes<Damage>>;
+using GameWorld = cellulose::World<GameChunk>;
+
+constexpr cellulose::u8 hits_to_break = 5;
+
 // "Solid" for raycasting and meshing: any non-air block id.
 auto is_solid(const cellulose::HotCellAttribute &p_attribute) -> bool {
 	return p_attribute.block_id != block_air;
+}
+
+// Read the mining progress of one cell through the cold-tier seqlock.
+auto damage_of(GameWorld &p_world, const cellulose::WorldPosition &p_cell) -> cellulose::u8 {
+	auto *chunk = p_world.find_chunk(cellulose::to_chunk_position(p_cell));
+	if (chunk == nullptr)
+		return 0;
+	const auto index = cellulose::encode_cell_index(cellulose::to_local_position(p_cell));
+	return chunk->read_cold([&](const auto &p_packed) {
+		return p_packed.template get<Damage>()[index].hits;
+	});
+}
+
+// Write the mining progress of one cell as the sole cold-tier writer.
+auto set_damage(GameWorld &p_world, const cellulose::WorldPosition &p_cell, cellulose::u8 p_hits) -> void {
+	auto *chunk = p_world.find_chunk(cellulose::to_chunk_position(p_cell));
+	if (chunk == nullptr)
+		return;
+	const auto index = cellulose::encode_cell_index(cellulose::to_local_position(p_cell));
+	chunk->write_cold([&](auto &p_packed) {
+		p_packed.template get<Damage>()[index].hits = p_hits;
+	});
 }
 
 // A 1x5 vertical strip: row `id` is the 16x16 tile for texture id `id`.
@@ -62,7 +103,7 @@ auto build_atlas_image() -> Image {
 }
 
 // A gentle sine-wave heightmap so there's terrain to dig into.
-auto generate(cellulose::World<> &p_world) -> void {
+auto generate(GameWorld &p_world) -> void {
 	for (int cx = 0; cx < chunks; ++cx)
 		for (int cz = 0; cz < chunks; ++cz) {
 			auto &chunk = p_world.chunk(cellulose::ChunkPosition{ cx, 0, cz });
@@ -91,7 +132,7 @@ auto in_grid(cellulose::i32 p_cx, cellulose::i32 p_cz) -> bool {
 } //namespace
 
 auto main() -> int {
-	cellulose::World<> world;
+	GameWorld world;
 	generate(world);
 	std::cout << "world: " << world.chunk_count() << " chunks generated\n";
 
@@ -171,6 +212,10 @@ auto main() -> int {
 	camera.fovy = 70.0f;
 	camera.projection = CAMERA_PERSPECTIVE;
 
+	// The block currently being mined; its `Damage` resets if we stop or look away.
+	std::optional<cellulose::WorldPosition> mining;
+	float mine_timer = 0.0f;
+
 	while (!WindowShouldClose()) {
 		// --- fly camera (raylib does the math; no gravity) --------------------
 		const float speed = 12.0f * GetFrameTime();
@@ -191,24 +236,40 @@ auto main() -> int {
 		};
 		const auto hit = cellulose::raycast(world, ray, 8.0, is_solid);
 
-		// --- break / place --------------------------------------------------
-		if (hit.has_value()) {
-			if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+		// --- mine (hold LMB) / place (RMB) ---------------------------------
+		mine_timer -= GetFrameTime();
+		const bool want_mine = hit.has_value() && IsMouseButtonDown(MOUSE_BUTTON_LEFT);
+
+		// Stopped mining, or the crosshair moved to another block: reset the
+		// half-mined block's Damage (Minecraft-style).
+		if (mining.has_value() && !(want_mine && mining.value() == hit->cell)) {
+			set_damage(world, mining.value(), 0);
+			mining.reset();
+		}
+
+		if (want_mine && mine_timer <= 0.0f) {
+			mine_timer = 0.15f;
+			mining = hit->cell;
+			const auto hits = static_cast<cellulose::u8>(damage_of(world, hit->cell) + 1);
+			set_damage(world, hit->cell, hits); // read-modify-write the custom attribute
+			if (hits >= hits_to_break) {
 				if (auto *chunk = world.find_chunk(cellulose::to_chunk_position(hit->cell))) {
 					chunk->hot_attribute(cellulose::to_local_position(hit->cell)).block_id = block_air;
 					touch(hit->cell);
 				}
-			} else if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) {
-				const cellulose::WorldPosition against{
-					hit->cell.x + hit->normal.x,
-					hit->cell.y + hit->normal.y,
-					hit->cell.z + hit->normal.z
-				};
-				const cellulose::ChunkPosition cp = cellulose::to_chunk_position(against);
-				if (in_grid(cp.x, cp.z) && cp.y == 0) {
-					world.chunk(cp).hot_attribute(cellulose::to_local_position(against)).block_id = block_grass;
-					touch(against);
-				}
+				set_damage(world, hit->cell, 0);
+				mining.reset();
+			}
+		} else if (hit.has_value() && IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) {
+			const cellulose::WorldPosition against{
+				hit->cell.x + hit->normal.x,
+				hit->cell.y + hit->normal.y,
+				hit->cell.z + hit->normal.z
+			};
+			const cellulose::ChunkPosition cp = cellulose::to_chunk_position(against);
+			if (in_grid(cp.x, cp.z) && cp.y == 0) {
+				world.chunk(cp).hot_attribute(cellulose::to_local_position(against)).block_id = block_grass;
+				touch(against);
 			}
 		}
 
@@ -232,17 +293,23 @@ auto main() -> int {
 					DrawMesh(meshes[ux][uz], material,
 							MatrixTranslate(static_cast<float>(cx * edge), 0.0f, static_cast<float>(cz * edge)));
 			}
-		if (hit.has_value())
+		cellulose::u8 aimed_damage = 0;
+		if (hit.has_value()) {
+			aimed_damage = damage_of(world, hit->cell); // read the custom attribute
+			const auto redness = static_cast<unsigned char>(255 * aimed_damage / hits_to_break);
 			DrawCubeWires(
 					Vector3{ hit->cell.x + 0.5f, hit->cell.y + 0.5f, hit->cell.z + 0.5f },
-					1.02f, 1.02f, 1.02f, BLACK);
+					1.02f, 1.02f, 1.02f, Color{ redness, 40, 40, 255 });
+		}
 		EndMode3D();
 
 		const int cx = GetScreenWidth() / 2;
 		const int cy = GetScreenHeight() / 2;
 		DrawLine(cx - 8, cy, cx + 8, cy, WHITE);
 		DrawLine(cx, cy - 8, cx, cy + 8, WHITE);
-		DrawText("WASD + mouse to fly   LMB break   RMB place", 12, 12, 20, RAYWHITE);
+		DrawText("WASD + mouse to fly   hold LMB to mine   RMB place", 12, 12, 20, RAYWHITE);
+		if (aimed_damage > 0)
+			DrawText(TextFormat("mining  %d / %d", aimed_damage, hits_to_break), 12, 36, 20, RAYWHITE);
 		DrawFPS(12, GetScreenHeight() - 28);
 
 		EndDrawing();
