@@ -50,20 +50,11 @@ endif()
 set(THIRDPARTY_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/thirdparty")
 
 block(SCOPE_FOR VARIABLES)
-    # Configuration variables for `libmorton`.
-    set(LIBMORTON_DIRECTORY "${THIRDPARTY_DIRECTORY}/libmorton")
-    set(BUILD_TESTING OFF CACHE INTERNAL "")
-    add_subdirectory("${LIBMORTON_DIRECTORY}")
-endblock()
-
-block(SCOPE_FOR VARIABLES)
-    # Configuration variables for `libmorton`.
     set(UNORDERED_DENSE_DIRECTORY "${THIRDPARTY_DIRECTORY}/unordered_dense")
     add_subdirectory("${UNORDERED_DENSE_DIRECTORY}")
 endblock()
 
 block(SCOPE_FOR VARIABLES)
-    # Configuration variables for `libmorton`.
     set(FMT_DIRECTORY "${THIRDPARTY_DIRECTORY}/fmt")
     add_subdirectory("${FMT_DIRECTORY}")
 endblock()
@@ -82,7 +73,6 @@ add_library(${LIBRARY_NAME} INTERFACE)
 target_include_directories(${LIBRARY_NAME} INTERFACE ${INCLUDE_DIRECTORY})
 target_link_libraries(${LIBRARY_NAME}
     INTERFACE
-    libmorton
     unordered_dense
     fmt
     Threads::Threads

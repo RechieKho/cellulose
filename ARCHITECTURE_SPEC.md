@@ -10,10 +10,11 @@ tracked in `REMAINING_TASKS.md`.
 
 - **Language / build:** C++20, CMake ≥ 3.10. `libcellulose` is a header-only
   `INTERFACE` target; all library code lives in headers under `inc/cellulose/`.
-- **Vendored deps:** `libmorton`, `ankerl::unordered_dense`, `fmt`, `raylib`
-  (submodules / FetchContent). Test dep: `doctest` v2.5.3 via FetchContent.
-- **Status:** subsystem 1 (Core Data Structure) is implemented and tested;
-  subsystems 2–4 are designed but not built.
+- **Deps:** `ankerl::unordered_dense` + `fmt` (submodules), `raylib` (FetchContent,
+  demo only), `doctest` v2.5.3 (FetchContent, tests only). Morton coding is
+  hand-rolled in `morton.hpp` — no `libmorton` (its `uint_fast*`-templated LUT
+  overloads are ambiguous on LP64 where those types collapse).
+- **Status:** all four subsystems implemented and tested (70 cases).
 
 ---
 
@@ -81,13 +82,12 @@ ever padded `i32[3]`, this would need a `std::tuple` fallback.
 ### 1.3 Morton cell index (`morton.hpp`)
 
 - `using CellIndex = u32;`
-- `encode_cell_index(LocalPosition) -> CellIndex` — thin wrapper over
-  `libmorton::morton3D_32_encode`
-- `decode_cell_index(CellIndex) -> LocalPosition` — over `morton3D_32_decode`
+- `encode_cell_index(LocalPosition) -> CellIndex` / `decode_cell_index` — a
+  self-contained 3-D magic-bits interleave (`x` → bit 0, `y` → 1, `z` → 2),
+  well-defined for each axis in `[0, 1024)`.
 
-Over the 5-bit-per-axis domain this is a bijection onto `[0, 2^15)` (verified
-exhaustively for all 32768 positions). `decode_cell_index` is only well-defined
-for indices produced by `encode_cell_index` from an in-range `LocalPosition`.
+Over the 5-bit-per-axis chunk domain this is a bijection onto `[0, 2^15)`
+(verified exhaustively for all 32768 positions).
 
 ### 1.4 Chunk (`chunk.hpp`)
 
@@ -313,7 +313,7 @@ copying a local sub-range in one seqlock acquisition.
 | ID | Decision |
 |----|----------|
 | A1 | Chunk edge length `32` (`32³ = 32768` cells) |
-| A2 | `CellIndex = u32`, `libmorton::morton3D_32_encode` |
+| A2 | `CellIndex = u32`; hand-rolled magic-bits Morton3D (no `libmorton`) |
 | A3 | `LocalPosition{ u8 x,y,z }` in `[0,32)` |
 | A4 | `ChunkPosition{ i32 x,y,z }`, padding-free (`sizeof == 12`) |
 | A5 | `WorldPosition{ i64 x,y,z }` |

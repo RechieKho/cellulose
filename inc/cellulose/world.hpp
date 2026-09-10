@@ -7,6 +7,7 @@
 #include "types.hpp"
 #include <ankerl/unordered_dense.h>
 #include <memory>
+#include <mutex>
 #include <shared_mutex>
 #include <type_traits>
 

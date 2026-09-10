@@ -1,6 +1,7 @@
 #ifndef CEL_RWLOCK_HPP
 #define CEL_RWLOCK_HPP
 
+#include <mutex>
 #include <shared_mutex>
 #include <type_traits>
 #include <utility>

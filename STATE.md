@@ -72,6 +72,20 @@ ctest --test-dir build       # <3 s; 70 cases
 - The portable signal is the threaded **stress tests** (they fail deterministically
   if you remove the lock they're testing — verified during Phase 2).
 
+### GCC / Linux vs MSVC
+
+The dev machine is MSVC — MSVC is lenient about missing transitive includes and
+some overload resolution. The GitHub Linux/macOS CI (GCC/Clang, **LP64**) is
+stricter. Two classes of thing that bit here and will bite again:
+
+- **`<shared_mutex>` does not pull `<mutex>`** on libstdc++. Any header using
+  `std::unique_lock` / `std::lock_guard` must `#include <mutex>` explicitly.
+- **`uint_fast16_t == uint_fast32_t == uint_fast64_t == unsigned long` on LP64
+  Linux** — they collapse. This made `libmorton`'s `uint_fast*`-templated LUT
+  overloads ambiguous, so `libmorton` was **dropped** — `morton.hpp` is now a
+  self-contained magic-bits interleave. Don't reintroduce a `uint_fast*`-heavy
+  templated dependency without checking it on Linux.
+
 ---
 
 ## Gotchas (the ones that will bite)

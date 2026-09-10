@@ -3,32 +3,50 @@
 
 #include "coordinate.hpp"
 #include "types.hpp"
-#include <libmorton/morton.h>
-#include <cstdint>
 
 namespace cellulose {
 
 /// @brief Morton-encoded index of a cell within a chunk's 1D storage arrays.
 using CellIndex = u32;
 
-/// @brief Interleave a local position into its Morton code.
+namespace impl {
+
+// Spread the low 10 bits of `p_value` so each occupies every third bit position
+// (the "magic bits" method). Inverse: `morton_gather3`.
+inline auto morton_spread3(u32 p_value) -> u32 {
+	u32 x = p_value & 0x000003ffu;
+	x = (x ^ (x << 16)) & 0xff0000ffu;
+	x = (x ^ (x << 8)) & 0x0300f00fu;
+	x = (x ^ (x << 4)) & 0x030c30c3u;
+	x = (x ^ (x << 2)) & 0x09249249u;
+	return x;
+}
+
+inline auto morton_gather3(u32 p_value) -> u32 {
+	u32 x = p_value & 0x09249249u;
+	x = (x ^ (x >> 2)) & 0x030c30c3u;
+	x = (x ^ (x >> 4)) & 0x0300f00fu;
+	x = (x ^ (x >> 8)) & 0xff0000ffu;
+	x = (x ^ (x >> 16)) & 0x000003ffu;
+	return x;
+}
+
+} //namespace impl
+
+/// @brief Interleave a local position into its Morton code (`x` → bit 0, `y` → 1,
+/// `z` → 2). Well-defined for each axis in `[0, 1024)`.
 inline auto encode_cell_index(const LocalPosition &p_position) -> CellIndex {
-	return static_cast<CellIndex>(libmorton::morton3D_32_encode(
-			static_cast<uint_fast16_t>(p_position.x),
-			static_cast<uint_fast16_t>(p_position.y),
-			static_cast<uint_fast16_t>(p_position.z)));
+	return impl::morton_spread3(p_position.x) |
+			(impl::morton_spread3(p_position.y) << 1) |
+			(impl::morton_spread3(p_position.z) << 2);
 }
 
 /// @brief De-interleave a Morton code back into a local position.
 inline auto decode_cell_index(CellIndex p_index) -> LocalPosition {
-	uint_fast16_t x = 0;
-	uint_fast16_t y = 0;
-	uint_fast16_t z = 0;
-	libmorton::morton3D_32_decode(static_cast<uint_fast32_t>(p_index), x, y, z);
 	return LocalPosition{
-		static_cast<u8>(x),
-		static_cast<u8>(y),
-		static_cast<u8>(z)
+		static_cast<u8>(impl::morton_gather3(p_index)),
+		static_cast<u8>(impl::morton_gather3(p_index >> 1)),
+		static_cast<u8>(impl::morton_gather3(p_index >> 2))
 	};
 }
 
